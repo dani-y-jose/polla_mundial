@@ -71,6 +71,10 @@ export default function UnifiedDashboard() {
   // Form/Local States
   const [loading, setLoading] = useState(true);
   const [savingPrediction, setSavingPrediction] = useState<Record<string, boolean>>({});
+  // Tracks which predictions are persisted and unmodified, keyed `${groupId}_${matchId}`.
+  // true = saved exactly as shown; false/absent = unsaved edits. Drives the
+  // "✓ Guardado" / "Cambios sin guardar" indicator in the predictions tab.
+  const [savedPredictions, setSavedPredictions] = useState<Record<string, boolean>>({});
   // This user's saved champion per group (groupId -> team). `selectedChampion`
   // and `championSaved` track the picker for the currently selected group.
   const [championsByGroup, setChampionsByGroup] = useState<Record<string, string>>({});
@@ -276,12 +280,16 @@ export default function UnifiedDashboard() {
       const predsQuery = query(collection(db, "predictions"), where("userId", "==", uid));
       const predsSnapshot = await getDocs(predsQuery);
       const byGroup: Record<string, Record<string, Prediction>> = {};
+      const savedSeed: Record<string, boolean> = {};
       predsSnapshot.forEach((doc) => {
         const data = { id: doc.id, ...doc.data() } as Prediction;
         if (!data.groupId) return; // ignore any legacy global predictions
         (byGroup[data.groupId] ??= {})[data.matchId] = data;
+        // Everything loaded from Firestore is, by definition, already saved.
+        savedSeed[`${data.groupId}_${data.matchId}`] = true;
       });
       setPredictionsByGroup(byGroup);
+      setSavedPredictions(savedSeed);
 
       // 5. Fetch this user's champion picks across their groups (groupId -> team).
       const champsQuery = query(collection(db, "champions"), where("userId", "==", uid));
@@ -457,6 +465,9 @@ export default function UnifiedDashboard() {
     // Keep only digits and allow an empty value so the field can be cleared.
     const sanitized = scoreStr.replace(/\D/g, "").slice(0, 2);
 
+    // Any edit makes the shown prediction diverge from what's saved.
+    setSavedPredictions((prev) => ({ ...prev, [`${gid}_${matchId}`]: false }));
+
     setPredictionsByGroup((prev) => {
       const groupPreds = prev[gid] || {};
       const existing = groupPreds[matchId] || getDisplayPrediction(matchId) || ({
@@ -537,6 +548,7 @@ export default function UnifiedDashboard() {
         ...prev,
         [gid]: { ...(prev[gid] || {}), [matchId]: payload },
       }));
+      setSavedPredictions(prev => ({ ...prev, [`${gid}_${matchId}`]: true }));
     } catch (err) {
       console.error("Error saving prediction:", err);
       alert("Error al guardar el pronóstico.");
@@ -740,17 +752,30 @@ export default function UnifiedDashboard() {
   }
 
   // Calculate stats for home view countdowns
+  const kickoffMsOf = (m: Match) =>
+    m.kickoffTime instanceof Date ? m.kickoffTime.getTime() : (m.kickoffTime as any).toMillis();
+
   const nextMatch = matches.find(m => m.status === "upcoming");
   let countdownText = "";
   if (nextMatch) {
-    const kickoffMs = nextMatch.kickoffTime instanceof Date ? nextMatch.kickoffTime.getTime() : (nextMatch.kickoffTime as any).toMillis();
-    const diff = kickoffMs - Date.now();
+    const diff = kickoffMsOf(nextMatch) - Date.now();
     if (diff > 0) {
       const days = Math.floor(diff / (1000 * 60 * 60 * 24));
       const hours = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
       countdownText = `Cierra en ${days}d ${hours}h`;
     }
   }
+
+  // Home tab match sections: today's matches (any status) get full cards, and the
+  // next 3 matches kicking off after today get smaller cards below. `matches` is
+  // already sorted by kickoff ascending, so filtering/slicing keeps chronological order.
+  const startOfToday = new Date(new Date().getFullYear(), new Date().getMonth(), new Date().getDate()).getTime();
+  const startOfTomorrow = startOfToday + 24 * 60 * 60 * 1000;
+  const todaysMatches = matches.filter(m => {
+    const ms = kickoffMsOf(m);
+    return ms >= startOfToday && ms < startOfTomorrow;
+  });
+  const upcomingMatches = matches.filter(m => kickoffMsOf(m) >= startOfTomorrow).slice(0, 3);
 
   // Real-time missing prediction calculations inside the next 24 hours, for the
   // currently selected group (predictions are per-group, so "missing" means not
@@ -988,10 +1013,10 @@ export default function UnifiedDashboard() {
                 </div>
               )}
 
-              {/* Today's Match Section */}
+              {/* Today's Matches Section */}
               <div className="space-y-3">
                 <div className="flex items-center justify-between">
-                  <h3 className="font-bold text-sm text-gray-400 uppercase tracking-wider">Partidos Destacados</h3>
+                  <h3 className="font-bold text-sm text-gray-400 uppercase tracking-wider">Partidos de Hoy</h3>
                   {countdownText && (
                     <span className="text-[10px] bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 font-bold px-2 py-0.5 rounded">
                       {countdownText}
@@ -999,36 +1024,83 @@ export default function UnifiedDashboard() {
                   )}
                 </div>
 
-                {nextMatch ? (
-                  <div className="p-5 bg-white/5 border border-white/10 rounded-2xl flex flex-col items-center gap-4">
-                    <div className="text-[10px] text-emerald-400 font-bold uppercase tracking-wider">{(PHASE_TRANSLATIONS[nextMatch.phase] || nextMatch.phase).toUpperCase()}</div>
-                    <div className="flex items-center justify-between w-full text-center gap-2">
-                      <div className="flex-1 flex flex-col items-center gap-0.5">
-                        <span className="text-2xl">{getFlag(nextMatch.homeTeam)}</span>
-                        <span className="font-bold text-xs truncate">{nextMatch.homeTeam}</span>
+                {todaysMatches.length > 0 ? (
+                  todaysMatches.map(match => {
+                    const kickoffMs = kickoffMsOf(match);
+                    const timeStr = new Date(kickoffMs).toLocaleTimeString("es", { hour: "2-digit", minute: "2-digit" });
+                    return (
+                      <div key={match.id} className="p-5 bg-white/5 border border-white/10 rounded-2xl flex flex-col items-center gap-4">
+                        <div className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-wider">
+                          <span className="text-emerald-400">{(PHASE_TRANSLATIONS[match.phase] || match.phase).toUpperCase()}</span>
+                          <span className="text-gray-600">·</span>
+                          <span className="text-gray-400">
+                            {match.status === "finished" ? "Final" : match.status === "locked" ? "En juego" : timeStr}
+                          </span>
+                        </div>
+                        <div className="flex items-center justify-between w-full text-center gap-2">
+                          <div className="flex-1 flex flex-col items-center gap-0.5">
+                            <span className="text-2xl">{getFlag(match.homeTeam)}</span>
+                            <span className="font-bold text-xs truncate">{match.homeTeam}</span>
+                          </div>
+                          {match.status === "finished" ? (
+                            <span className="text-lg font-black shrink-0">{match.homeScore} - {match.awayScore}</span>
+                          ) : (
+                            <span className="text-xs text-gray-500 font-bold shrink-0">vs</span>
+                          )}
+                          <div className="flex-1 flex flex-col items-center gap-0.5">
+                            <span className="text-2xl">{getFlag(match.awayTeam)}</span>
+                            <span className="font-bold text-xs truncate">{match.awayTeam}</span>
+                          </div>
+                        </div>
+                        <div className="text-center text-[10px] text-gray-500">
+                          {match.stadiumName}, {match.city}
+                        </div>
+                        {match.status === "upcoming" && (
+                          <button
+                            onClick={() => setActiveTab("predictions")}
+                            className="w-full py-2.5 bg-white/10 hover:bg-white/20 border border-white/5 text-xs font-bold rounded-xl transition-all"
+                          >
+                            → Ir a Pronósticos
+                          </button>
+                        )}
                       </div>
-                      <span className="text-xs text-gray-500 font-bold shrink-0">vs</span>
-                      <div className="flex-1 flex flex-col items-center gap-0.5">
-                        <span className="text-2xl">{getFlag(nextMatch.awayTeam)}</span>
-                        <span className="font-bold text-xs truncate">{nextMatch.awayTeam}</span>
-                      </div>
-                    </div>
-                    <div className="text-center text-[10px] text-gray-500">
-                      {nextMatch.stadiumName}, {nextMatch.city}
-                    </div>
-                    <button 
-                      onClick={() => setActiveTab("predictions")}
-                      className="w-full py-2.5 bg-white/10 hover:bg-white/20 border border-white/5 text-xs font-bold rounded-xl transition-all"
-                    >
-                      → Ir a Pronósticos
-                    </button>
-                  </div>
+                    );
+                  })
                 ) : (
                   <div className="p-8 text-center text-gray-500 text-xs bg-white/5 border border-white/5 rounded-2xl">
-                    No hay próximos partidos programados.
+                    No hay partidos programados para hoy.
                   </div>
                 )}
               </div>
+
+              {/* Next Matches Section (smaller cards) */}
+              {upcomingMatches.length > 0 && (
+                <div className="space-y-3">
+                  <h3 className="font-bold text-sm text-gray-400 uppercase tracking-wider">Próximos Partidos</h3>
+                  {upcomingMatches.map(match => {
+                    const kickoffMs = kickoffMsOf(match);
+                    const dateStr = new Date(kickoffMs).toLocaleDateString("es", { weekday: "short", day: "numeric", month: "short" });
+                    const timeStr = new Date(kickoffMs).toLocaleTimeString("es", { hour: "2-digit", minute: "2-digit" });
+                    return (
+                      <div key={match.id} className="p-3 bg-white/5 border border-white/5 rounded-xl flex items-center gap-3">
+                        <div className="flex items-center gap-1.5 flex-1 min-w-0">
+                          <span className="text-base shrink-0">{getFlag(match.homeTeam)}</span>
+                          <span className="font-semibold text-[11px] truncate">{match.homeTeam}</span>
+                        </div>
+                        <span className="text-[10px] text-gray-500 font-bold shrink-0">vs</span>
+                        <div className="flex items-center gap-1.5 flex-1 min-w-0 justify-end">
+                          <span className="font-semibold text-[11px] truncate text-right">{match.awayTeam}</span>
+                          <span className="text-base shrink-0">{getFlag(match.awayTeam)}</span>
+                        </div>
+                        <div className="shrink-0 text-right border-l border-white/5 pl-3 leading-tight">
+                          <div className="text-[9px] text-gray-400 font-semibold capitalize">{dateStr}</div>
+                          <div className="text-[9px] text-emerald-400 font-bold">{timeStr}</div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
 
             </div>
           )}
@@ -1114,6 +1186,9 @@ export default function UnifiedDashboard() {
                     const kickoffMs = match.kickoffTime instanceof Date ? match.kickoffTime.getTime() : (match.kickoffTime as any).toMillis();
                     const isLocked = Date.now() >= kickoffMs || match.status === "locked" || match.status === "finished";
                     const pred: Prediction = getDisplayPrediction(match.id) || ({ predictedHomeScore: "", predictedAwayScore: "" } as unknown as Prediction);
+                    // Saved/dirty state for this match in the selected group.
+                    const isSaved = !!selectedGroup && !!savedPredictions[`${selectedGroup.id}_${match.id}`];
+                    const hasBothScores = `${pred.predictedHomeScore ?? ""}` !== "" && `${pred.predictedAwayScore ?? ""}` !== "";
 
                     return (
                       <div key={match.id} className="p-4 bg-white/5 border border-white/10 rounded-2xl relative overflow-hidden">
@@ -1178,13 +1253,25 @@ export default function UnifiedDashboard() {
                         {(!isLocked && groups.length > 0) || pred.pointsEarned !== null ? (
                           <div className="flex flex-col items-center gap-1 mt-2">
                             {!isLocked && groups.length > 0 && (
-                              <button
-                                onClick={() => submitPrediction(match.id)}
-                                disabled={savingPrediction[match.id]}
-                                className="px-6 py-1 bg-emerald-600 hover:bg-emerald-500 disabled:bg-neutral-800 text-[10px] font-bold rounded-lg transition-all"
-                              >
-                                {savingPrediction[match.id] ? "..." : "✓ Guardar"}
-                              </button>
+                              <>
+                                <button
+                                  onClick={() => submitPrediction(match.id)}
+                                  disabled={savingPrediction[match.id] || isSaved}
+                                  className={`px-6 py-1 text-[10px] font-bold rounded-lg transition-all ${
+                                    isSaved
+                                      ? "bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 cursor-default"
+                                      : "bg-emerald-600 hover:bg-emerald-500 disabled:bg-neutral-800"
+                                  }`}
+                                >
+                                  {savingPrediction[match.id] ? "Guardando..." : isSaved ? "✓ Guardado" : "✓ Guardar"}
+                                </button>
+                                {/* Tell the user, persistently, whether what they see is saved. */}
+                                {isSaved ? (
+                                  <span className="text-[9px] text-emerald-300/80 font-medium">Tu pronóstico está guardado</span>
+                                ) : hasBothScores && !savingPrediction[match.id] ? (
+                                  <span className="text-[9px] text-amber-400 font-bold uppercase tracking-wider">Cambios sin guardar</span>
+                                ) : null}
+                              </>
                             )}
                             {pred.pointsEarned !== null && (
                               <span className={`text-[9px] font-black uppercase ${pred.pointsEarned === 3 ? "text-yellow-400" : pred.pointsEarned === 1 ? "text-emerald-400" : "text-red-400"}`}>

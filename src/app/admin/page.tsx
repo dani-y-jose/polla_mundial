@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { onAuthStateChanged } from "firebase/auth";
 import { auth, db } from "@/lib/firebase";
-import { collection, getDocs, doc, setDoc, getDoc, updateDoc, deleteDoc, query, where, writeBatch, Timestamp } from "firebase/firestore";
+import { collection, getDocs, doc, setDoc, getDoc, updateDoc, query, where, writeBatch } from "firebase/firestore";
 import { Match, MatchPhase, ResolutionMethod, User, Prediction, Invite } from "@/types";
 import { calculatePoints } from "@/lib/scoring";
 import { getMaxMembersPerGroup, DEFAULT_MAX_MEMBERS_PER_GROUP } from "@/lib/config";
@@ -117,19 +117,16 @@ export default function AdminPage() {
   const [syncLoading, setSyncLoading] = useState(false);
   const [backfillLoading, setBackfillLoading] = useState(false);
 
-  // App invites (sign-up gate)
-  const [invites, setInvites] = useState<Invite[]>([]);
-  const [inviteMaxUses, setInviteMaxUses] = useState("10");
-  const [inviteExpiry, setInviteExpiry] = useState(""); // datetime-local, optional
-  const [inviteLoading, setInviteLoading] = useState(false);
-  const [origin, setOrigin] = useState("");
-
   // Global config (admin-only): max members per group.
   const [maxMembers, setMaxMembers] = useState(DEFAULT_MAX_MEMBERS_PER_GROUP);
   const [maxMembersInput, setMaxMembersInput] = useState(String(DEFAULT_MAX_MEMBERS_PER_GROUP));
   const [configLoading, setConfigLoading] = useState(false);
-  
+  // Transient "saved" confirmations shown inline next to their buttons.
+  const [configSaved, setConfigSaved] = useState(false);
+  const [matchCreated, setMatchCreated] = useState(false);
+
   // New Match Form State
+  const [createLoading, setCreateLoading] = useState(false);
   const [homeTeam, setHomeTeam] = useState("");
   const [awayTeam, setAwayTeam] = useState("");
   const [kickoffTime, setKickoffTime] = useState("");
@@ -140,10 +137,6 @@ export default function AdminPage() {
   const [refereeCountry, setRefereeCountry] = useState("");
 
   const router = useRouter();
-
-  useEffect(() => {
-    if (typeof window !== "undefined") setOrigin(window.location.origin);
-  }, []);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
@@ -179,8 +172,6 @@ export default function AdminPage() {
           return timeB - timeA; // Descending
         });
         setMatches(matchesData);
-
-        await refreshInvites();
 
         const cap = await getMaxMembersPerGroup();
         setMaxMembers(cap);
@@ -289,96 +280,6 @@ export default function AdminPage() {
     }
   };
 
-  // Load invites for the admin management list. Only generic 'app' invites are
-  // shown here; group invites are managed from the /groups page by their creator.
-  const refreshInvites = async () => {
-    const snap = await getDocs(collection(db, "invites"));
-    const list: Invite[] = [];
-    snap.forEach((d) => list.push({ ...(d.data() as Invite), code: d.id }));
-    // App invites only; group invites are surfaced on /groups.
-    setInvites(
-      list
-        .filter((i) => i.type === "app")
-        .sort((a, b) => {
-          const ta = a.createdAt instanceof Date ? a.createdAt.getTime() : (a.createdAt as any)?.toMillis?.() ?? 0;
-          const tb = b.createdAt instanceof Date ? b.createdAt.getTime() : (b.createdAt as any)?.toMillis?.() ?? 0;
-          return tb - ta;
-        })
-    );
-  };
-
-  const handleCreateAppInvite = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!user) return;
-    const max = parseInt(inviteMaxUses, 10);
-    if (!max || max < 1) {
-      alert("El límite de usos debe ser al menos 1.");
-      return;
-    }
-    setInviteLoading(true);
-    try {
-      // Generate a unique, unguessable code (doc id == code).
-      const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
-      const gen = () => Array.from({ length: 10 }, () => chars.charAt(Math.floor(Math.random() * chars.length))).join("");
-      let code = gen();
-      for (let attempt = 0; attempt < 5; attempt++) {
-        const existing = await getDoc(doc(db, "invites", code));
-        if (!existing.exists()) break;
-        code = gen();
-      }
-
-      const newInvite = {
-        code,
-        type: "app" as const,
-        groupId: null,
-        maxUses: max,
-        uses: 0,
-        consumedBy: [] as string[],
-        expiresAt: inviteExpiry ? Timestamp.fromDate(new Date(inviteExpiry)) : null,
-        active: true,
-        createdBy: user.uid,
-        createdAt: new Date(),
-      };
-
-      await setDoc(doc(db, "invites", code), newInvite);
-      setInviteMaxUses("10");
-      setInviteExpiry("");
-      await refreshInvites();
-    } catch (err) {
-      console.error(err);
-      alert("Error al crear la invitación.");
-    } finally {
-      setInviteLoading(false);
-    }
-  };
-
-  const handleToggleInvite = async (invite: Invite) => {
-    try {
-      await updateDoc(doc(db, "invites", invite.code), { active: !invite.active });
-      await refreshInvites();
-    } catch (err) {
-      console.error(err);
-      alert("Error al actualizar la invitación.");
-    }
-  };
-
-  const handleDeleteInvite = async (invite: Invite) => {
-    if (!confirm("¿Eliminar esta invitación? El enlace dejará de funcionar.")) return;
-    try {
-      await deleteDoc(doc(db, "invites", invite.code));
-      await refreshInvites();
-    } catch (err) {
-      console.error(err);
-      alert("Error al eliminar la invitación.");
-    }
-  };
-
-  const copyInviteLink = (code: string) => {
-    const link = `${origin}/login?invite=${code}`;
-    navigator.clipboard.writeText(link);
-    alert("Enlace copiado:\n" + link);
-  };
-
   // Migration: mint an /invites group doc for any pre-existing group whose code
   // only lived in the retired /inviteCodes lookup, so old links keep working
   // under the unified invite model. Safe to run repeatedly.
@@ -420,7 +321,6 @@ export default function AdminPage() {
       }
 
       await batch.commit();
-      await refreshInvites();
       alert(`Migración completada: se registraron ${toWrite} invitación(es) de grupo.`);
     } catch (err) {
       console.error(err);
@@ -441,7 +341,8 @@ export default function AdminPage() {
     try {
       await setDoc(doc(db, "config", "app"), { maxMembersPerGroup: value }, { merge: true });
       setMaxMembers(value);
-      alert(`Máximo de miembros por grupo actualizado a ${value}.`);
+      setConfigSaved(true);
+      setTimeout(() => setConfigSaved(false), 3000);
     } catch (err) {
       console.error(err);
       alert("Error al guardar la configuración.");
@@ -452,6 +353,7 @@ export default function AdminPage() {
 
   const handleCreateMatch = async (e: React.FormEvent) => {
     e.preventDefault();
+    setCreateLoading(true);
     try {
       const matchId = `match_${Date.now()}`;
       const payload: Match = {
@@ -472,12 +374,15 @@ export default function AdminPage() {
 
       await setDoc(doc(db, "matches", matchId), payload);
       setMatches([payload, ...matches]);
-      alert("¡Partido creado con éxito!");
       // Reset form
       setHomeTeam(""); setAwayTeam(""); setKickoffTime(""); setCity(""); setStadiumName(""); setRefereeName(""); setRefereeCountry("");
+      setMatchCreated(true);
+      setTimeout(() => setMatchCreated(false), 3000);
     } catch (err) {
       console.error(err);
       alert("Error al crear el partido.");
+    } finally {
+      setCreateLoading(false);
     }
   };
 
@@ -599,13 +504,16 @@ export default function AdminPage() {
                 className="w-32 mt-1 px-3 py-2 bg-black/50 border border-white/10 rounded"
               />
             </div>
-            <button
-              onClick={handleSaveMaxMembers}
-              disabled={configLoading}
-              className="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-black font-extrabold text-xs uppercase tracking-wider rounded-xl transition-all"
-            >
-              {configLoading ? "Guardando..." : "Guardar"}
-            </button>
+            <div className="flex flex-col items-start gap-1">
+              <button
+                onClick={handleSaveMaxMembers}
+                disabled={configLoading}
+                className="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-black font-extrabold text-xs uppercase tracking-wider rounded-xl transition-all"
+              >
+                {configLoading ? "Guardando..." : "Guardar"}
+              </button>
+              {configSaved && <span className="text-xs text-emerald-400 font-bold">✓ Guardado</span>}
+            </div>
           </div>
         </section>
 
@@ -622,83 +530,6 @@ export default function AdminPage() {
           >
             {backfillLoading ? "Migrando..." : "Migrar Invitaciones 🔑"}
           </button>
-        </section>
-
-        {/* App Invites (sign-up gate) */}
-        <section className="bg-white/5 p-6 rounded-xl border border-white/10 space-y-6">
-          <div>
-            <h2 className="text-xl font-semibold text-amber-400">Invitaciones de Registro</h2>
-            <p className="text-xs text-gray-400 mt-1">
-              El registro es solo por invitación. Crea enlaces con un límite de usos (y opcionalmente una fecha de expiración) para controlar cuántas personas pueden crear una cuenta. Los enlaces de grupo también permiten registrarse y unirse al grupo.
-            </p>
-          </div>
-
-          <form onSubmit={handleCreateAppInvite} className="flex flex-col sm:flex-row gap-4 sm:items-end">
-            <div className="flex-1">
-              <label className="text-sm text-gray-400">Límite de usos</label>
-              <input
-                type="number"
-                min="1"
-                required
-                value={inviteMaxUses}
-                onChange={(e) => setInviteMaxUses(e.target.value)}
-                className="w-full mt-1 px-3 py-2 bg-black/50 border border-white/10 rounded"
-              />
-            </div>
-            <div className="flex-1">
-              <label className="text-sm text-gray-400">Expira (opcional)</label>
-              <input
-                type="datetime-local"
-                value={inviteExpiry}
-                onChange={(e) => setInviteExpiry(e.target.value)}
-                className="w-full mt-1 px-3 py-2 bg-black/50 border border-white/10 rounded"
-              />
-            </div>
-            <button
-              type="submit"
-              disabled={inviteLoading}
-              className="px-6 py-2 bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-black font-extrabold text-xs uppercase tracking-wider rounded transition-all"
-            >
-              {inviteLoading ? "Creando..." : "Crear Enlace 🎟️"}
-            </button>
-          </form>
-
-          {invites.length === 0 ? (
-            <p className="text-sm text-gray-500">Aún no hay invitaciones de registro.</p>
-          ) : (
-            <div className="space-y-3">
-              {invites.map((inv) => {
-                const expMs = inv.expiresAt
-                  ? (inv.expiresAt instanceof Date ? inv.expiresAt.getTime() : (inv.expiresAt as any)?.toMillis?.())
-                  : null;
-                const expired = expMs != null && expMs < Date.now();
-                const full = inv.uses >= inv.maxUses;
-                const usable = inv.active && !expired && !full;
-                return (
-                  <div key={inv.code} className="bg-black/40 p-4 rounded-lg border border-white/5 flex flex-col sm:flex-row sm:items-center gap-3">
-                    <div className="flex-1 min-w-0">
-                      <div className="font-mono text-sm text-amber-300 truncate">/login?invite={inv.code}</div>
-                      <div className="text-xs text-gray-400 mt-1">
-                        {inv.uses}/{inv.maxUses} usos
-                        {expMs != null && <> • expira {new Date(expMs).toLocaleString()}</>}
-                        {" • "}
-                        <span className={usable ? "text-emerald-400" : "text-red-400"}>
-                          {!inv.active ? "desactivada" : expired ? "expirada" : full ? "llena" : "activa"}
-                        </span>
-                      </div>
-                    </div>
-                    <div className="flex gap-2 shrink-0">
-                      <button onClick={() => copyInviteLink(inv.code)} className="px-3 py-1.5 bg-white/10 hover:bg-white/20 text-xs font-semibold rounded transition-all">Copiar</button>
-                      <button onClick={() => handleToggleInvite(inv)} className="px-3 py-1.5 bg-white/10 hover:bg-white/20 text-xs font-semibold rounded transition-all">
-                        {inv.active ? "Desactivar" : "Activar"}
-                      </button>
-                      <button onClick={() => handleDeleteInvite(inv)} className="px-3 py-1.5 bg-red-600/20 hover:bg-red-600/30 text-red-300 text-xs font-semibold rounded transition-all">Eliminar</button>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
         </section>
 
         {/* Create Match Form */}
@@ -721,8 +552,9 @@ export default function AdminPage() {
             <div><label className="text-sm text-gray-400">Estadio</label><input required value={stadiumName} onChange={e=>setStadiumName(e.target.value)} className="w-full mt-1 px-3 py-2 bg-black/50 border border-white/10 rounded" /></div>
             <div><label className="text-sm text-gray-400">Nombre del Árbitro</label><input required value={refereeName} onChange={e=>setRefereeName(e.target.value)} className="w-full mt-1 px-3 py-2 bg-black/50 border border-white/10 rounded" /></div>
             <div><label className="text-sm text-gray-400">País del Árbitro</label><input required value={refereeCountry} onChange={e=>setRefereeCountry(e.target.value)} className="w-full mt-1 px-3 py-2 bg-black/50 border border-white/10 rounded" /></div>
-            <div className="md:col-span-2 pt-4">
-              <button type="submit" className="px-6 py-2 bg-emerald-600 hover:bg-emerald-500 rounded font-medium">Agregar Partido</button>
+            <div className="md:col-span-2 pt-4 flex items-center gap-3">
+              <button type="submit" disabled={createLoading} className="px-6 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 rounded font-medium">{createLoading ? "Agregando..." : "Agregar Partido"}</button>
+              {matchCreated && <span className="text-sm text-emerald-400 font-bold">✓ Partido creado con éxito</span>}
             </div>
           </form>
         </section>
@@ -757,10 +589,22 @@ export default function AdminPage() {
   );
 }
 
-function MatchScoreUpdater({ match, onUpdate }: { match: Match, onUpdate: (id: string, hs: string, as: string, res: ResolutionMethod) => void }) {
+function MatchScoreUpdater({ match, onUpdate }: { match: Match, onUpdate: (id: string, hs: string, as: string, res: ResolutionMethod) => Promise<void> }) {
   const [hScore, setHScore] = useState(match.homeScore?.toString() || "");
   const [aScore, setAScore] = useState(match.awayScore?.toString() || "");
   const [res, setRes] = useState<ResolutionMethod>("normal");
+  const [saving, setSaving] = useState(false);
+
+  // Await the update so the button reflects the in-flight write (scoring + the
+  // notification batch take a moment) and can't be double-fired.
+  const handleClick = async () => {
+    setSaving(true);
+    try {
+      await onUpdate(match.id, hScore, aScore, res);
+    } finally {
+      setSaving(false);
+    }
+  };
 
   return (
     <div className="flex items-center gap-3 bg-black/40 p-4 rounded-lg border border-white/5">
@@ -772,7 +616,7 @@ function MatchScoreUpdater({ match, onUpdate }: { match: Match, onUpdate: (id: s
         <option value="extra_time">Tiempo Extra</option>
         <option value="penalties">Penales</option>
       </select>
-      <button onClick={() => onUpdate(match.id, hScore, aScore, res)} className="h-10 px-4 bg-purple-600 hover:bg-purple-500 rounded text-sm font-medium">Actualizar</button>
+      <button onClick={handleClick} disabled={saving} className="h-10 px-4 bg-purple-600 hover:bg-purple-500 disabled:opacity-50 rounded text-sm font-medium">{saving ? "Actualizando..." : "Actualizar"}</button>
     </div>
   );
 }
