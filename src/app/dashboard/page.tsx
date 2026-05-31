@@ -202,14 +202,9 @@ export default function UnifiedDashboard() {
         groupsData.push({ id: doc.id, ...doc.data() } as Group);
       });
       setGroups(groupsData);
-      
-      if (groupsData.length > 0) {
-        // Default to first group
-        setSelectedGroup(groupsData[0]);
-        await loadGroupLeaderboard(groupsData[0]);
-      }
 
-      // 3. Fetch Matches
+      // 3. Fetch Matches (must happen before computing the leaderboard, which
+      // depends on the finished matches to award points).
       const matchesSnapshot = await getDocs(collection(db, "matches"));
       const matchesData: Match[] = [];
       matchesSnapshot.forEach((doc) => {
@@ -221,6 +216,13 @@ export default function UnifiedDashboard() {
         return timeA - timeB;
       });
       setMatches(matchesData);
+
+      if (groupsData.length > 0) {
+        // Default to first group. Pass the freshly-fetched matches explicitly,
+        // since the `matches` state set above is not yet visible in this closure.
+        setSelectedGroup(groupsData[0]);
+        await loadGroupLeaderboard(groupsData[0], matchesData);
+      }
 
       // 4. Fetch User's Predictions
       const predsQuery = query(collection(db, "predictions"), where("userId", "==", uid));
@@ -240,7 +242,7 @@ export default function UnifiedDashboard() {
   };
 
   // Load member profiles for leaderboard
-  const loadGroupLeaderboard = async (group: Group) => {
+  const loadGroupLeaderboard = async (group: Group, matchesList?: Match[]) => {
     try {
       const membersData: User[] = [];
       // Fetch members in chunks of 10 (Firestore limitations)
@@ -274,7 +276,10 @@ export default function UnifiedDashboard() {
         finalsBonus: 0
       };
       const activeRules = group.rules || defaultRules;
-      const calculatedScores = calculateGroupScores(group.members, matches, predsData, activeRules);
+      // Use freshly-fetched matches when provided (during initial load the `matches`
+      // state is still empty here), otherwise fall back to the current state.
+      const matchesForScoring = matchesList ?? matches;
+      const calculatedScores = calculateGroupScores(group.members, matchesForScoring, predsData, activeRules);
       setGroupScores(calculatedScores);
 
       // Sort by dynamic group-specific totalPoints desc, then exactGuesses desc
