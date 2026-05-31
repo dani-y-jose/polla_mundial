@@ -66,27 +66,18 @@ export default function UnifiedDashboard() {
   const [predictionPage, setPredictionPage] = useState(1);
   const [searchQuery, setSearchQuery] = useState("");
   
-  // Group Management States
-  const [newGroupName, setNewGroupName] = useState("");
-  const [joinInviteCode, setJoinInviteCode] = useState("");
-  const [groupActionLoading, setGroupActionLoading] = useState(false);
+  // Group + leaderboard states
   const [groupError, setGroupError] = useState("");
   const [groupScores, setGroupScores] = useState<Record<string, { totalPoints: number; exactGuesses: number }>>({});
-  const [createdGroup, setCreatedGroup] = useState<Group | null>(null);
   const [notifications, setNotifications] = useState<any[]>([]);
   const [showNotifDrawer, setShowNotifDrawer] = useState(false);
 
-  // New Group Config States
-  const [entryFee, setEntryFee] = useState(0);
-  const [exactScorePoints, setExactScorePoints] = useState(3);
-  const [correctOutcomePoints, setCorrectOutcomePoints] = useState(1);
-  const [uniquePredictionPoints, setUniquePredictionPoints] = useState(0);
-  const [quarterFinalsBonus, setQuarterFinalsBonus] = useState(0);
-  const [semiFinalsBonus, setSemiFinalsBonus] = useState(0);
-  const [finalsBonus, setFinalsBonus] = useState(0);
-  const [firstPlacePercent, setFirstPlacePercent] = useState(50);
-  const [secondPlacePercent, setSecondPlacePercent] = useState(30);
-  const [thirdPlacePercent, setThirdPlacePercent] = useState(20);
+  // Pending group invite to confirm joining — sourced from ?join=CODE (a link
+  // followed while signed in / right after sign-up) or, as a fallback, the code
+  // that admitted this account (dbUser.inviteId). Resolved in loadAllData.
+  const [pendingInvite, setPendingInvite] = useState<{ code: string; groupId: string; groupName: string } | null>(null);
+  const [joiningPending, setJoiningPending] = useState(false);
+  const [pendingDismissed, setPendingDismissed] = useState(false);
 
   const router = useRouter();
 
@@ -184,9 +175,10 @@ export default function UnifiedDashboard() {
       setLoading(true);
 
       // 1. Fetch User profile document
+      let userData: any = null;
       const userDoc = await getDoc(doc(db, "users", uid));
       if (userDoc.exists()) {
-        const userData = userDoc.data();
+        userData = userDoc.data();
         setDbUser(userData);
         if (userData.champion) {
           setSelectedChampion(userData.champion);
@@ -202,6 +194,29 @@ export default function UnifiedDashboard() {
         groupsData.push({ id: doc.id, ...doc.data() } as Group);
       });
       setGroups(groupsData);
+
+      // 2b. Resolve a pending group invite to confirm joining. A ?join=CODE in
+      // the URL (link followed while signed in / right after sign-up) wins;
+      // otherwise fall back to the code that admitted this account. Only offered
+      // when it points at a group the user isn't already a member of.
+      const joinCode =
+        new URLSearchParams(window.location.search).get("join")?.trim() ||
+        (userData?.inviteId as string | undefined) ||
+        null;
+      if (joinCode) {
+        try {
+          const invSnap = await getDoc(doc(db, "invites", joinCode));
+          if (invSnap.exists()) {
+            const inv = invSnap.data();
+            const gid = (inv.groupId as string | null) ?? null;
+            if (gid && !groupsData.some((g) => g.id === gid)) {
+              setPendingInvite({ code: joinCode, groupId: gid, groupName: (inv.groupName as string) || "tu grupo" });
+            }
+          }
+        } catch (e) {
+          console.error("Error resolving pending invite:", e);
+        }
+      }
 
       // 3. Fetch Matches (must happen before computing the leaderboard, which
       // depends on the finished matches to award points).
@@ -400,125 +415,33 @@ export default function UnifiedDashboard() {
     }
   };
 
-  // Group creation/joining inside the app shell
-  const handleCreateGroup = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newGroupName.trim() || !user) return;
-    setGroupActionLoading(true);
+  // Confirm joining the group offered by the invite link. Adding only our own
+  // uid is permitted by the rules (and capped by the global member limit); a
+  // rejection here means the group is full.
+  const handleConfirmJoin = async () => {
+    if (!pendingInvite || !user) return;
+    setJoiningPending(true);
     setGroupError("");
 
     try {
-      if (firstPlacePercent + secondPlacePercent + thirdPlacePercent !== 100) {
-        setGroupError("La distribución de premios debe sumar exactamente 100%.");
-        setGroupActionLoading(false);
-        return;
-      }
-
-      const groupId = `group_${Date.now()}`;
-      const characters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
-      let code = "";
-      for (let i = 0; i < 6; i++) {
-        code += characters.charAt(Math.floor(Math.random() * characters.length));
-      }
-
-      const newGroup: Group = {
-        id: groupId,
-        name: newGroupName.trim(),
-        creatorId: user.uid,
-        inviteCode: code,
-        members: [user.uid],
-        createdAt: new Date(),
-        entryFee: Number(entryFee),
-        rules: {
-          exactScorePoints: Number(exactScorePoints),
-          correctOutcomePoints: Number(correctOutcomePoints),
-          uniquePredictionPoints: Number(uniquePredictionPoints),
-          quarterFinalsBonus: Number(quarterFinalsBonus),
-          semiFinalsBonus: Number(semiFinalsBonus),
-          finalsBonus: Number(finalsBonus),
-        },
-        prizeDistribution: {
-          firstPlacePercent: Number(firstPlacePercent),
-          secondPlacePercent: Number(secondPlacePercent),
-          thirdPlacePercent: Number(thirdPlacePercent),
-        }
-      };
-
-      const batch = writeBatch(db);
-      batch.set(doc(db, "groups", groupId), newGroup);
-      batch.set(doc(db, "inviteCodes", code), { code, groupId });
-      await batch.commit();
-      const updatedGroups = [...groups, newGroup];
-      setGroups(updatedGroups);
-      setSelectedGroup(newGroup);
-      setNewGroupName("");
-      setEntryFee(0);
-      setExactScorePoints(3);
-      setCorrectOutcomePoints(1);
-      setUniquePredictionPoints(0);
-      setQuarterFinalsBonus(0);
-      setSemiFinalsBonus(0);
-      setFinalsBonus(0);
-      setFirstPlacePercent(50);
-      setSecondPlacePercent(30);
-      setThirdPlacePercent(20);
-      await loadGroupLeaderboard(newGroup);
-      setActiveTab("table"); // Switch to Leaderboard tab
-      setCreatedGroup(newGroup);
-    } catch (err: any) {
-      console.error(err);
-      setGroupError("Error al crear el grupo.");
-    } finally {
-      setGroupActionLoading(false);
-    }
-  };
-
-  const handleJoinGroup = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const cleanCode = joinInviteCode.trim().toUpperCase();
-    if (!cleanCode || !user) return;
-    setGroupActionLoading(true);
-    setGroupError("");
-
-    try {
-      const codeSnap = await getDoc(doc(db, "inviteCodes", cleanCode));
-      if (!codeSnap.exists()) {
-        setGroupError("Código de invitación inválido.");
-        setGroupActionLoading(false);
-        return;
-      }
-
-      const { groupId } = codeSnap.data() as { groupId: string };
-
-      // Already a member? Just open it.
-      const alreadyMember = groups.find((g) => g.id === groupId);
-      if (alreadyMember) {
-        setSelectedGroup(alreadyMember);
-        await loadGroupLeaderboard(alreadyMember);
-        setActiveTab("table");
-        setJoinInviteCode("");
-        return;
-      }
-
-      // Adding only ourselves is permitted before we can read the group.
-      await updateDoc(doc(db, "groups", groupId), {
+      await updateDoc(doc(db, "groups", pendingInvite.groupId), {
         members: arrayUnion(user.uid),
       });
 
       // Now that we are a member we can read the full group document.
-      const groupSnap = await getDoc(doc(db, "groups", groupId));
-      const updatedGroup = { id: groupSnap.id, ...groupSnap.data() } as Group;
-      setGroups([...groups, updatedGroup]);
-      setSelectedGroup(updatedGroup);
-      await loadGroupLeaderboard(updatedGroup);
+      const groupSnap = await getDoc(doc(db, "groups", pendingInvite.groupId));
+      const joined = { id: groupSnap.id, ...groupSnap.data() } as Group;
+      setGroups([...groups, joined]);
+      setSelectedGroup(joined);
+      await loadGroupLeaderboard(joined);
+      setPendingInvite(null);
+      router.replace("/dashboard"); // drop the ?join= param
       setActiveTab("table");
-      setJoinInviteCode("");
-      alert(`¡Te has unido a "${updatedGroup.name}"!`);
     } catch (err: any) {
       console.error(err);
-      setGroupError("Error al unirse al grupo.");
+      setGroupError("No pudimos unirte a este grupo. Es posible que ya esté lleno.");
     } finally {
-      setGroupActionLoading(false);
+      setJoiningPending(false);
     }
   };
 
@@ -669,6 +592,39 @@ export default function UnifiedDashboard() {
                 )}
               </div>
 
+              {/* Confirm-join card — appears when arriving via an invite link */}
+              {pendingInvite && !pendingDismissed && (
+                <div className="p-6 bg-gradient-to-br from-neutral-900 via-neutral-900 to-emerald-950/30 border border-emerald-500/30 rounded-2xl space-y-4 shadow-xl text-left relative">
+                  <button
+                    onClick={() => setPendingDismissed(true)}
+                    className="absolute top-3 right-3 h-7 w-7 rounded-full bg-white/5 hover:bg-white/10 border border-white/10 flex items-center justify-center text-xs text-gray-400"
+                    aria-label="Descartar invitación"
+                  >
+                    ✕
+                  </button>
+                  <div className="flex items-center gap-3 border-b border-white/5 pb-3">
+                    <span className="text-2xl">🎉</span>
+                    <div>
+                      <h4 className="font-black text-emerald-300 text-xs tracking-wide uppercase">Invitación a un grupo</h4>
+                      <p className="text-[9px] text-gray-400 font-medium">Confirma para unirte y empezar a competir por el pozo.</p>
+                    </div>
+                  </div>
+                  <p className="text-xs text-gray-300">
+                    Te invitaron a unirte a <span className="font-bold text-white">{pendingInvite.groupName}</span>.
+                  </p>
+                  {groupError && (
+                    <p className="text-[11px] text-red-300">{groupError}</p>
+                  )}
+                  <button
+                    onClick={handleConfirmJoin}
+                    disabled={joiningPending}
+                    className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold text-[10px] rounded-xl transition-all uppercase tracking-wider text-center disabled:opacity-50"
+                  >
+                    {joiningPending ? "Uniéndote..." : `Confirmar y unirme a ${pendingInvite.groupName}`}
+                  </button>
+                </div>
+              )}
+
               {/* Missing Predictions Reminder Banner */}
               {missingPredictions24h.length > 0 && (
                 <div className="p-4 bg-red-500/10 border border-red-500/20 rounded-2xl flex items-start gap-3 shadow-lg">
@@ -711,7 +667,7 @@ export default function UnifiedDashboard() {
                     <div className="flex gap-3">
                       <span className="h-5 w-5 bg-purple-500/20 border border-purple-500/30 rounded-full flex items-center justify-center text-[10px] text-purple-300 font-extrabold shrink-0">2</span>
                       <p className="text-gray-300 text-[11px] leading-relaxed">
-                        <strong className="text-purple-300 font-bold">Activa tus Pronósticos:</strong> Para apostar y sumar puntos, debes crear un nuevo grupo privado o unirte al de un amigo.
+                        <strong className="text-purple-300 font-bold">Activa tus Pronósticos:</strong> Para apostar y sumar puntos, crea un grupo privado o únete con el enlace de invitación de un amigo.
                       </p>
                     </div>
                     <div className="flex gap-3">
@@ -723,8 +679,8 @@ export default function UnifiedDashboard() {
                   </div>
 
                   <div className="pt-2 border-t border-white/5">
-                    <button 
-                      onClick={() => setActiveTab("profile")}
+                    <button
+                      onClick={() => router.push("/groups")}
                       className="w-full py-2.5 bg-purple-600 hover:bg-purple-500 text-white font-extrabold text-[10px] rounded-xl transition-all uppercase tracking-wider text-center"
                     >
                       👥 Crear o Unirse a un Grupo
@@ -1025,7 +981,7 @@ export default function UnifiedDashboard() {
                   <div className="flex gap-2 pt-2 border-t border-white/5 mt-2">
                     <a 
                       href={`https://api.whatsapp.com/send?text=${encodeURIComponent(
-                        `¡Únete a mi grupo de apuestas en La Polla Mundial 2026! ⚽🏆\n\nGrupo: *${selectedGroup.name}*\nCódigo de Invitación: *${selectedGroup.inviteCode}*\nInscripción: *${selectedGroup.entryFee ? `$${selectedGroup.entryFee.toLocaleString()}` : "Gratis"}*\n\nRegístrate e ingresa tus pronósticos aquí: ${typeof window !== 'undefined' ? window.location.origin : ''}/login?gcode=${selectedGroup.inviteCode}`
+                        `¡Únete a mi grupo de apuestas en La Polla Mundial 2026! ⚽🏆\n\nGrupo: *${selectedGroup.name}*\nCódigo de Invitación: *${selectedGroup.inviteCode}*\nInscripción: *${selectedGroup.entryFee ? `$${selectedGroup.entryFee.toLocaleString()}` : "Gratis"}*\n\nRegístrate e ingresa tus pronósticos aquí: ${typeof window !== 'undefined' ? window.location.origin : ''}/login?invite=${selectedGroup.inviteCode}`
                       )}`}
                       target="_blank"
                       rel="noopener noreferrer"
@@ -1117,193 +1073,18 @@ export default function UnifiedDashboard() {
                 </div>
               </div>
 
-              {/* Group Management Errors */}
-              {groupError && (
-                <div className="p-3 bg-red-500/10 border border-red-500/20 text-red-200 rounded-xl text-xs">
-                  {groupError}
-                </div>
-              )}
-
-              {/* Groups call-to-action header */}
-              <div className="text-center space-y-1">
-                <h2 className="text-lg font-black text-white tracking-tight">⚽ Juega con tus amigos</h2>
-                <p className="text-[11px] text-gray-400">Únete a un grupo con un código o crea el tuyo para competir por el pozo.</p>
-              </div>
-
-              {/* Create/Join Panels */}
-              <div className="grid grid-cols-1 gap-4">
-
-                {/* Join Group Card */}
-                <div className="p-5 bg-gradient-to-br from-purple-600/20 to-purple-900/10 border border-purple-500/30 rounded-2xl space-y-3 shadow-lg">
-                  <h3 className="flex items-center gap-2 font-extrabold text-base text-purple-300">
-                    <span className="text-xl">🔑</span> Unirse a un Grupo
-                  </h3>
-                  <form onSubmit={handleJoinGroup} className="flex gap-2">
-                    <input 
-                      type="text"
-                      required
-                      value={joinInviteCode}
-                      onChange={(e) => setJoinInviteCode(e.target.value)}
-                      maxLength={6}
-                      placeholder="CÓDIGO"
-                      className="flex-1 px-3 py-2 bg-black/40 border border-white/10 rounded-xl focus:outline-none focus:ring-1 focus:ring-purple-500 uppercase tracking-widest text-center font-mono font-bold text-sm"
-                    />
-                    <button 
-                      type="submit"
-                      disabled={groupActionLoading}
-                      className="px-4 py-2 bg-purple-600 hover:bg-purple-500 rounded-xl font-bold text-xs transition-all disabled:opacity-50"
-                    >
-                      Unirse
-                    </button>
-                  </form>
-                </div>
-
-                {/* Create Group Card */}
-                <div className="p-5 bg-gradient-to-br from-emerald-600/20 to-emerald-900/10 border border-emerald-500/30 rounded-2xl space-y-3 shadow-lg">
-                  <h3 className="flex items-center gap-2 font-extrabold text-base text-emerald-300">
-                    <span className="text-xl">➕</span> Crear un Grupo
-                  </h3>
-                  <form onSubmit={handleCreateGroup} className="space-y-4">
-                    <div>
-                      <label className="block text-[10px] text-gray-400 uppercase font-semibold mb-1">Nombre del Grupo</label>
-                      <input 
-                        type="text"
-                        required
-                        value={newGroupName}
-                        onChange={(e) => setNewGroupName(e.target.value)}
-                        placeholder="Nombre de tu Polla"
-                        className="w-full px-3 py-2 bg-black/40 border border-white/10 rounded-xl focus:outline-none focus:ring-1 focus:ring-emerald-500 text-xs"
-                      />
-                    </div>
-                    
-                    <div className="grid grid-cols-2 gap-3">
-                      <div>
-                        <label className="block text-[10px] text-gray-400 uppercase font-semibold mb-1">Inscripción al Pozo ($)</label>
-                        <input 
-                          type="number"
-                          min="0"
-                          value={entryFee}
-                          onChange={(e) => setEntryFee(Number(e.target.value))}
-                          className="w-full px-3 py-2 bg-black/40 border border-white/10 rounded-xl focus:outline-none focus:ring-1 focus:ring-emerald-500 text-xs font-bold text-emerald-400"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-[10px] text-gray-400 uppercase font-semibold mb-1">Marcador Exacto (pts)</label>
-                        <input 
-                          type="number"
-                          min="0"
-                          value={exactScorePoints}
-                          onChange={(e) => setExactScorePoints(Number(e.target.value))}
-                          className="w-full px-3 py-2 bg-black/40 border border-white/10 rounded-xl focus:outline-none focus:ring-1 focus:ring-emerald-500 text-xs"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-[10px] text-gray-400 uppercase font-semibold mb-1">Acertar Ganador (pts)</label>
-                        <input 
-                          type="number"
-                          min="0"
-                          value={correctOutcomePoints}
-                          onChange={(e) => setCorrectOutcomePoints(Number(e.target.value))}
-                          className="w-full px-3 py-2 bg-black/40 border border-white/10 rounded-xl focus:outline-none focus:ring-1 focus:ring-emerald-500 text-xs"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-[10px] text-gray-400 uppercase font-semibold mb-1">Bono Predicción Única (pts)</label>
-                        <input 
-                          type="number"
-                          min="0"
-                          value={uniquePredictionPoints}
-                          onChange={(e) => setUniquePredictionPoints(Number(e.target.value))}
-                          className="w-full px-3 py-2 bg-black/40 border border-white/10 rounded-xl focus:outline-none focus:ring-1 focus:ring-emerald-500 text-xs"
-                        />
-                      </div>
-                    </div>
-
-                    <div className="border-t border-white/5 pt-2 space-y-2">
-                      <span className="block text-[9px] text-gray-500 uppercase font-bold tracking-wider">Bonos por Rondas Completas</span>
-                      <div className="grid grid-cols-3 gap-2">
-                        <div>
-                          <label className="block text-[8px] text-gray-400 uppercase mb-0.5">Cuartos</label>
-                          <input 
-                            type="number"
-                            min="0"
-                            value={quarterFinalsBonus}
-                            onChange={(e) => setQuarterFinalsBonus(Number(e.target.value))}
-                            className="w-full px-2 py-1 bg-black/40 border border-white/10 rounded-lg text-xs"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-[8px] text-gray-400 uppercase mb-0.5">Semis</label>
-                          <input 
-                            type="number"
-                            min="0"
-                            value={semiFinalsBonus}
-                            onChange={(e) => setSemiFinalsBonus(Number(e.target.value))}
-                            className="w-full px-2 py-1 bg-black/40 border border-white/10 rounded-lg text-xs"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-[8px] text-gray-400 uppercase mb-0.5">Final</label>
-                          <input 
-                            type="number"
-                            min="0"
-                            value={finalsBonus}
-                            onChange={(e) => setFinalsBonus(Number(e.target.value))}
-                            className="w-full px-2 py-1 bg-black/40 border border-white/10 rounded-lg text-xs"
-                          />
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="border-t border-white/5 pt-2 space-y-2">
-                      <span className="block text-[9px] text-gray-500 uppercase font-bold tracking-wider">Distribución del Pozo</span>
-                      <div className="grid grid-cols-3 gap-2">
-                        <div>
-                          <label className="block text-[8px] text-gray-400 uppercase mb-0.5">1º Puesto (%)</label>
-                          <input 
-                            type="number"
-                            min="0"
-                            max="100"
-                            value={firstPlacePercent}
-                            onChange={(e) => setFirstPlacePercent(Number(e.target.value))}
-                            className="w-full px-2 py-1 bg-black/40 border border-white/10 rounded-lg text-xs font-bold text-yellow-400"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-[8px] text-gray-400 uppercase mb-0.5">2º Puesto (%)</label>
-                          <input 
-                            type="number"
-                            min="0"
-                            max="100"
-                            value={secondPlacePercent}
-                            onChange={(e) => setSecondPlacePercent(Number(e.target.value))}
-                            className="w-full px-2 py-1 bg-black/40 border border-white/10 rounded-lg text-xs"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-[8px] text-gray-400 uppercase mb-0.5">3º Puesto (%)</label>
-                          <input 
-                            type="number"
-                            min="0"
-                            max="100"
-                            value={thirdPlacePercent}
-                            onChange={(e) => setThirdPlacePercent(Number(e.target.value))}
-                            className="w-full px-2 py-1 bg-black/40 border border-white/10 rounded-lg text-xs"
-                          />
-                        </div>
-                      </div>
-                    </div>
-
-                    <button 
-                      type="submit"
-                      disabled={groupActionLoading}
-                      className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-500 rounded-xl font-bold text-xs transition-all disabled:opacity-50"
-                    >
-                      {groupActionLoading ? "Creando..." : "Crear Grupo de Apuestas"}
-                    </button>
-                  </form>
-                </div>
-
+              {/* Group management lives on the dedicated /groups page */}
+              <div className="p-5 bg-gradient-to-br from-emerald-600/20 to-emerald-900/10 border border-emerald-500/30 rounded-2xl space-y-3 shadow-lg text-center">
+                <h3 className="flex items-center justify-center gap-2 font-extrabold text-base text-emerald-300">
+                  <span className="text-xl">⚽</span> Juega con tus amigos
+                </h3>
+                <p className="text-[11px] text-gray-400">Crea un grupo o únete con un código, y comparte tu enlace de invitación por WhatsApp.</p>
+                <button
+                  onClick={() => router.push("/groups")}
+                  className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-500 rounded-xl font-bold text-xs transition-all"
+                >
+                  Gestionar mis grupos →
+                </button>
               </div>
 
               {/* List of my groups in profile */}
@@ -1330,7 +1111,7 @@ export default function UnifiedDashboard() {
                         </div>
                         <a
                           href={`https://api.whatsapp.com/send?text=${encodeURIComponent(
-                            `¡Únete a mi grupo de apuestas en La Polla Mundial 2026! ⚽🏆\n\nGrupo: *${g.name}*\nCódigo de Invitación: *${g.inviteCode}*\nInscripción: *${g.entryFee ? `$${g.entryFee.toLocaleString()}` : "Gratis"}*\n\nRegístrate e ingresa tus pronósticos aquí: ${typeof window !== 'undefined' ? window.location.origin : ''}/login?gcode=${g.inviteCode}`
+                            `¡Únete a mi grupo de apuestas en La Polla Mundial 2026! ⚽🏆\n\nGrupo: *${g.name}*\nCódigo de Invitación: *${g.inviteCode}*\nInscripción: *${g.entryFee ? `$${g.entryFee.toLocaleString()}` : "Gratis"}*\n\nRegístrate e ingresa tus pronósticos aquí: ${typeof window !== 'undefined' ? window.location.origin : ''}/login?invite=${g.inviteCode}`
                           )}`}
                           target="_blank"
                           rel="noopener noreferrer"
@@ -1396,59 +1177,6 @@ export default function UnifiedDashboard() {
           </button>
 
         </nav>
-
-        {/* Success Creation Modal with WhatsApp Link */}
-        {createdGroup && (
-          <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-[100] p-4">
-            <div className="max-w-sm w-full bg-neutral-900 border border-white/10 p-6 rounded-2xl space-y-5 shadow-2xl animate-in fade-in zoom-in-95 duration-200 text-white">
-              <div className="text-center space-y-2">
-                <span className="text-4xl">🏆</span>
-                <h3 className="text-lg font-bold text-emerald-400">¡Grupo Creado!</h3>
-                <p className="text-xs text-gray-400">Comparte tu grupo de apuestas en WhatsApp para invitar a tus amigos.</p>
-              </div>
-
-              <div className="bg-black/40 p-4 rounded-xl border border-white/5 space-y-2 text-xs">
-                <div className="flex justify-between">
-                  <span className="text-gray-500 font-medium">Grupo:</span>
-                  <span className="font-bold text-white">{createdGroup.name}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-gray-500 font-medium">Código:</span>
-                  <span className="font-mono font-bold text-purple-400 text-sm tracking-wider">{createdGroup.inviteCode}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-gray-500 font-medium">Inscripción:</span>
-                  <span className="font-bold text-emerald-400">
-                    {createdGroup.entryFee ? `$${createdGroup.entryFee.toLocaleString()}` : "Gratis"}
-                  </span>
-                </div>
-              </div>
-
-              <div className="space-y-2 pt-2">
-                <a 
-                  href={`https://api.whatsapp.com/send?text=${encodeURIComponent(
-                    `¡Únete a mi grupo de apuestas en La Polla Mundial 2026! ⚽🏆\n\nGrupo: *${createdGroup.name}*\nCódigo de Invitación: *${createdGroup.inviteCode}*\nInscripción: *${createdGroup.entryFee ? `$${createdGroup.entryFee.toLocaleString()}` : "Gratis"}*\n\nRegístrate e ingresa tus pronósticos aquí: ${typeof window !== 'undefined' ? window.location.origin : ''}/login?gcode=${createdGroup.inviteCode}`
-                  )}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="w-full py-2.5 bg-[#25D366] hover:bg-[#20ba56] text-black font-bold text-xs rounded-xl flex items-center justify-center gap-2 transition-all font-sans"
-                >
-                  <svg className="w-4.5 h-4.5 fill-current" viewBox="0 0 24 24">
-                    <path d="M12.012 1.985c-5.522 0-10 4.478-10 10 0 1.772.463 3.518 1.342 5.062L2.012 22.015l5.127-1.342a9.92 9.92 0 0 0 4.873 1.28c5.522 0 10-4.478 10-10 0-5.522-4.478-10-10-10zm-.012 1.5c4.687 0 8.5 3.813 8.5 8.5s-3.813 8.5-8.5 8.5a8.423 8.423 0 0 1-4.14-1.09l-.297-.176-3.08.808.82-3.003-.193-.307A8.441 8.441 0 0 1 3.5 11.985c0-4.687 3.813-8.5 8.5-8.5zm-3.666 3.86a.916.916 0 0 0-.646.3c-.22.235-.58.643-.58 1.488s.614 1.666.7 1.784c.086.117 1.18 1.91 2.937 2.585.418.16.744.256.998.337.42.13.8.113 1.102.068.337-.05 1.037-.425 1.182-.835s.145-.765.1-.835c-.045-.07-.164-.117-.344-.207s-1.037-.512-1.197-.57-.275-.086-.39.085c-.117.17-.45.57-.55.683-.1.117-.2.13-.38.04-1.74-.87-2.316-1.782-2.52-2.13-.086-.152-.01-.235.066-.31.068-.068.152-.178.228-.266.075-.09.1-.152.152-.255a.35.35 0 0 0-.018-.344c-.045-.09-.39-.938-.535-1.287-.14-.34-.296-.29-.406-.296-.105-.005-.226-.005-.347-.005z"/>
-                  </svg>
-                  Compartir en WhatsApp
-                </a>
-                
-                <button 
-                  onClick={() => setCreatedGroup(null)}
-                  className="w-full py-2 bg-white/5 hover:bg-white/10 text-white border border-white/10 font-bold text-[10px] rounded-xl transition-all"
-                >
-                  Cerrar
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
 
         {/* Notifications Drawer Overlay */}
         {showNotifDrawer && (

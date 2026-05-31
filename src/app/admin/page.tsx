@@ -7,6 +7,7 @@ import { auth, db } from "@/lib/firebase";
 import { collection, getDocs, doc, setDoc, getDoc, updateDoc, deleteDoc, query, where, writeBatch, Timestamp } from "firebase/firestore";
 import { Match, MatchPhase, ResolutionMethod, User, Prediction, Invite } from "@/types";
 import { calculatePoints } from "@/lib/scoring";
+import { getMaxMembersPerGroup, DEFAULT_MAX_MEMBERS_PER_GROUP } from "@/lib/config";
 
 const PHASE_TRANSLATIONS: Record<string, string> = {
   group: "Fase de Grupos",
@@ -122,6 +123,11 @@ export default function AdminPage() {
   const [inviteExpiry, setInviteExpiry] = useState(""); // datetime-local, optional
   const [inviteLoading, setInviteLoading] = useState(false);
   const [origin, setOrigin] = useState("");
+
+  // Global config (admin-only): max members per group.
+  const [maxMembers, setMaxMembers] = useState(DEFAULT_MAX_MEMBERS_PER_GROUP);
+  const [maxMembersInput, setMaxMembersInput] = useState(String(DEFAULT_MAX_MEMBERS_PER_GROUP));
+  const [configLoading, setConfigLoading] = useState(false);
   
   // New Match Form State
   const [homeTeam, setHomeTeam] = useState("");
@@ -175,6 +181,10 @@ export default function AdminPage() {
         setMatches(matchesData);
 
         await refreshInvites();
+
+        const cap = await getMaxMembersPerGroup();
+        setMaxMembers(cap);
+        setMaxMembersInput(String(cap));
 
       } catch (err) {
         console.error("Error fetching data:", err);
@@ -279,14 +289,13 @@ export default function AdminPage() {
     }
   };
 
-  // One-time migration: backfill the public inviteCodes/{CODE} -> { groupId }
-  // lookup for groups that were created before the lookup collection existed.
-  // Safe to run repeatedly (only writes missing codes).
+  // Load invites for the admin management list. Only generic 'app' invites are
+  // shown here; group invites are managed from the /groups page by their creator.
   const refreshInvites = async () => {
     const snap = await getDocs(collection(db, "invites"));
     const list: Invite[] = [];
     snap.forEach((d) => list.push({ ...(d.data() as Invite), code: d.id }));
-    // App invites only; group invites live in /inviteCodes.
+    // App invites only; group invites are surfaced on /groups.
     setInvites(
       list
         .filter((i) => i.type === "app")
@@ -370,34 +379,74 @@ export default function AdminPage() {
     alert("Enlace copiado:\n" + link);
   };
 
+  // Migration: mint an /invites group doc for any pre-existing group whose code
+  // only lived in the retired /inviteCodes lookup, so old links keep working
+  // under the unified invite model. Safe to run repeatedly.
   const handleBackfillInviteCodes = async () => {
+    if (!user) return;
     setBackfillLoading(true);
     try {
+      const cap = await getMaxMembersPerGroup();
       const groupsSnapshot = await getDocs(collection(db, "groups"));
       const batch = writeBatch(db);
       let toWrite = 0;
 
       for (const groupDoc of groupsSnapshot.docs) {
-        const code = (groupDoc.data().inviteCode as string | undefined)?.toUpperCase();
+        const data = groupDoc.data();
+        const code = data.inviteCode as string | undefined;
         if (!code) continue;
-        const codeSnap = await getDoc(doc(db, "inviteCodes", code));
-        if (codeSnap.exists()) continue;
-        batch.set(doc(db, "inviteCodes", code), { code, groupId: groupDoc.id });
+        const inviteSnap = await getDoc(doc(db, "invites", code));
+        if (inviteSnap.exists()) continue;
+        const groupInvite: Invite = {
+          code,
+          type: "group",
+          groupId: groupDoc.id,
+          groupName: (data.name as string) || "tu grupo",
+          maxUses: cap,
+          uses: 0,
+          consumedBy: [],
+          expiresAt: null,
+          active: true,
+          createdBy: (data.creatorId as string) || user.uid,
+          createdAt: new Date(),
+        };
+        batch.set(doc(db, "invites", code), groupInvite);
         toWrite++;
       }
 
       if (toWrite === 0) {
-        alert("No hay códigos pendientes. Todos los grupos ya tienen su código de invitación registrado.");
+        alert("No hay invitaciones de grupo pendientes. Todos los grupos ya tienen su invitación registrada.");
         return;
       }
 
       await batch.commit();
-      alert(`Migración completada: se registraron ${toWrite} código(s) de invitación.`);
+      await refreshInvites();
+      alert(`Migración completada: se registraron ${toWrite} invitación(es) de grupo.`);
     } catch (err) {
       console.error(err);
-      alert("Error al migrar los códigos de invitación.");
+      alert("Error al migrar las invitaciones de grupo.");
     } finally {
       setBackfillLoading(false);
+    }
+  };
+
+  // Persist the global, admin-only member cap.
+  const handleSaveMaxMembers = async () => {
+    const value = parseInt(maxMembersInput, 10);
+    if (!value || value < 1) {
+      alert("El máximo de miembros por grupo debe ser al menos 1.");
+      return;
+    }
+    setConfigLoading(true);
+    try {
+      await setDoc(doc(db, "config", "app"), { maxMembersPerGroup: value }, { merge: true });
+      setMaxMembers(value);
+      alert(`Máximo de miembros por grupo actualizado a ${value}.`);
+    } catch (err) {
+      console.error(err);
+      alert("Error al guardar la configuración.");
+    } finally {
+      setConfigLoading(false);
     }
   };
 
@@ -561,18 +610,47 @@ export default function AdminPage() {
           </button>
         </section>
 
-        {/* Invite Codes Migration Section */}
+        {/* Global Config: Max members per group */}
+        <section className="bg-white/5 p-6 rounded-xl border border-white/10 flex flex-col md:flex-row justify-between md:items-end gap-4">
+          <div className="flex-1">
+            <h2 className="text-xl font-semibold text-emerald-400">Configuración Global</h2>
+            <p className="text-xs text-gray-400 mt-1">
+              Máximo de miembros por grupo. Aplica a todos los grupos (las invitaciones nuevas usan este valor y los grupos no pueden superarlo). Solo los administradores pueden cambiarlo. Actual: <span className="font-bold text-white">{maxMembers}</span>.
+            </p>
+          </div>
+          <div className="flex gap-3 items-end">
+            <div>
+              <label className="text-sm text-gray-400">Máx. miembros por grupo</label>
+              <input
+                type="number"
+                min="1"
+                value={maxMembersInput}
+                onChange={(e) => setMaxMembersInput(e.target.value)}
+                className="w-32 mt-1 px-3 py-2 bg-black/50 border border-white/10 rounded"
+              />
+            </div>
+            <button
+              onClick={handleSaveMaxMembers}
+              disabled={configLoading}
+              className="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-black font-extrabold text-xs uppercase tracking-wider rounded-xl transition-all"
+            >
+              {configLoading ? "Guardando..." : "Guardar"}
+            </button>
+          </div>
+        </section>
+
+        {/* Group Invites Migration Section */}
         <section className="bg-white/5 p-6 rounded-xl border border-white/10 flex flex-col md:flex-row justify-between items-center gap-4">
           <div>
-            <h2 className="text-xl font-semibold text-indigo-400">Migración: Códigos de Invitación</h2>
-            <p className="text-xs text-gray-400 mt-1">Registra el código de cada grupo existente en la tabla pública de búsqueda (necesario para unirse por código con las reglas reforzadas). Solo se ejecuta una vez; es seguro repetirlo.</p>
+            <h2 className="text-xl font-semibold text-indigo-400">Migración: Invitaciones de Grupo</h2>
+            <p className="text-xs text-gray-400 mt-1">Crea la invitación en /invites para cada grupo existente (para que los enlaces antiguos sigan funcionando con el modelo unificado). Solo se ejecuta una vez; es seguro repetirlo.</p>
           </div>
           <button
             onClick={handleBackfillInviteCodes}
             disabled={backfillLoading}
             className="px-6 py-3 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white font-extrabold text-xs uppercase tracking-wider rounded-xl transition-all"
           >
-            {backfillLoading ? "Migrando..." : "Sincronizar Códigos 🔑"}
+            {backfillLoading ? "Migrando..." : "Migrar Invitaciones 🔑"}
           </button>
         </section>
 

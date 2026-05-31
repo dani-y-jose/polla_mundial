@@ -13,15 +13,17 @@ export interface User {
   totalPoints?: number;
   exactGuesses?: number;
   champion?: string;
-  // How this account was admitted (invite-only gate). Set once at sign-up.
-  inviteId?: string;        // an /invites code (app-level invite)
-  inviteCodeUsed?: string;  // an /inviteCodes code (joined via a group link)
+  // How this account was admitted (invite-only gate). Set once at sign-up for
+  // every account — points at the /invites code that admitted them. For a group
+  // invite this is also the pending group the dashboard offers to join.
+  inviteId?: string;
 }
 
 export interface Invite {
   code: string;
   type: 'app' | 'group';
   groupId: string | null;
+  groupName?: string; // denormalized for the public login/confirm-join display
   maxUses: number;
   uses: number;
   consumedBy: string[];
@@ -29,6 +31,11 @@ export interface Invite {
   active: boolean;
   createdBy: string;
   createdAt: Date;
+}
+
+// Global, admin-only app configuration stored at /config/app.
+export interface AppConfig {
+  maxMembersPerGroup: number;
 }
 
 export interface GroupRules {

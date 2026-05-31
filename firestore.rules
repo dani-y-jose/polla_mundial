@@ -30,16 +30,21 @@ service cloud.firestore {
       return request.resource.data.diff(resourceData).affectedKeys();
     }
 
-    // ---- Sign-up gate helpers ----
-    // A new profile may only be created by consuming a valid invite. There are
-    // two accepted paths:
-    //   1. An app-level invite in /invites (admin-minted, capped + expiring).
-    //   2. An existing group invite code in /inviteCodes (group membership is
-    //      its own natural cap; the user joins the group in the same write).
+    // Global, admin-configurable cap on members per group. Falls back to 100
+    // when the /config/app doc has not been created yet. Kept in sync with
+    // DEFAULT_MAX_MEMBERS_PER_GROUP in src/lib/config.ts.
+    function maxMembersPerGroup() {
+      return exists(/databases/$(database)/documents/config/app)
+        ? get(/databases/$(database)/documents/config/app).data.get('maxMembersPerGroup', 100)
+        : 100;
+    }
 
-    // The invite doc must be active, unexpired, under its cap, not already used
-    // by this user, AND be bumped by exactly one use + this uid in the SAME
-    // atomic write (getAfter ties the two writes together).
+    // ---- Sign-up gate helper ----
+    // A new profile may only be created by consuming a valid invite from
+    // /invites (admin-minted app invites and user-minted group invites both
+    // live here). The invite doc must be active, unexpired, under its cap, not
+    // already used by this user, AND be bumped by exactly one use + this uid in
+    // the SAME atomic write (getAfter ties the two writes together).
     function consumeOk(code) {
       let before = get(/databases/$(database)/documents/invites/$(code)).data;
       let after = getAfter(/databases/$(database)/documents/invites/$(code)).data;
@@ -51,15 +56,10 @@ service cloud.firestore {
         && after.consumedBy == before.consumedBy.concat([request.auth.uid]);
     }
 
-    function validAppInvite(code) {
+    function validInvite(code) {
       return code != ''
         && exists(/databases/$(database)/documents/invites/$(code))
         && consumeOk(code);
-    }
-
-    function validGroupSignup(code) {
-      return code != ''
-        && exists(/databases/$(database)/documents/inviteCodes/$(code));
     }
 
     // ---- Users ----
@@ -68,15 +68,12 @@ service cloud.firestore {
       allow read: if isSignedIn();
 
       // On sign-up a user creates only their own doc, may never self-grant
-      // admin, and must consume a valid invite (app invite or group code) in
-      // the same atomic write — this is the invite-only gate.
+      // admin, and must consume a valid /invites code in the same atomic write
+      // — this is the invite-only gate.
       allow create: if isSignedIn()
         && request.auth.uid == userId
         && request.resource.data.isAdmin == false
-        && (
-          validAppInvite(request.resource.data.get('inviteId', ''))
-          || validGroupSignup(request.resource.data.get('inviteCodeUsed', ''))
-        );
+        && validInvite(request.resource.data.get('inviteId', ''));
 
       // Admins may update any profile (e.g. recomputed totalPoints/exactGuesses).
       // A user may update only their own whitelisted profile fields — never
@@ -151,7 +148,8 @@ service cloud.firestore {
         && request.resource.data.members == [request.auth.uid];
 
       // Update is allowed when:
-      //  - a user adds only themselves to members (joining via invite code), or
+      //  - a user adds only themselves to members (joining via invite link),
+      //    and the group stays within the global member cap, or
       //  - the creator edits the group, or
       //  - an admin edits the group.
       allow update: if isSignedIn() && (
@@ -159,6 +157,7 @@ service cloud.firestore {
           changed(resource.data).hasOnly(['members'])
           && request.resource.data.members.hasAll(resource.data.members)
           && request.resource.data.members.hasOnly(resource.data.members.concat([request.auth.uid]))
+          && request.resource.data.members.size() <= maxMembersPerGroup()
         )
         || resource.data.creatorId == request.auth.uid
         || isAdmin()
@@ -169,16 +168,31 @@ service cloud.firestore {
       );
     }
 
-    // ---- Invites (app-level sign-up gate) ----
-    // Admin-minted, capped, optionally-expiring links that let a new user
-    // create a profile. Doc id is the code.
+    // ---- Invites (sign-up gate + group join links) ----
+    // Capped, optionally-expiring links that let a new user create a profile.
+    // Admins mint generic 'app' invites; group creators mint 'group' invites
+    // tied to their group. Doc id is the code.
     match /invites/{code} {
       // Links are capability URLs (unguessable); allow lookup so the sign-up
       // page can validate the link before the user has authenticated.
       allow read: if true;
 
-      // Only admins mint or revoke invites.
-      allow create, delete: if isAdmin();
+      // Admins mint any invite. A signed-in user may mint a 'group' invite for
+      // themselves, with a fresh use count and the global cap as maxUses (so
+      // users can't pick their own cap).
+      allow create: if isAdmin() || (
+        isSignedIn()
+        && request.resource.data.type == 'group'
+        && request.resource.data.createdBy == request.auth.uid
+        && request.resource.data.uses == 0
+        && request.resource.data.consumedBy == []
+        && request.resource.data.maxUses == maxMembersPerGroup()
+      );
+
+      // Admins or the invite's creator may revoke it.
+      allow delete: if isAdmin() || (
+        isSignedIn() && resource.data.createdBy == request.auth.uid
+      );
 
       // Admins may edit freely (toggle active, raise the cap, change expiry).
       // A signing-up user may only "consume" the invite: bump uses by exactly
@@ -196,14 +210,12 @@ service cloud.firestore {
       );
     }
 
-    // ---- Invite codes ----
-    // Public lookup that maps an invite code -> groupId so a user can resolve a
-    // code to a group without being able to read every group. Doc id is the code.
-    match /inviteCodes/{code} {
-      allow read: if isSignedIn();
-      // Claim a code only if it is not already taken.
-      allow create: if isSignedIn() && resource == null;
-      allow update, delete: if isAdmin();
+    // ---- Global app config ----
+    // Single doc /config/app holding admin-only settings (e.g. the group member
+    // cap). Publicly readable so the sign-up page and rules can use it.
+    match /config/{doc} {
+      allow read: if true;
+      allow write: if isAdmin();
     }
   }
 }

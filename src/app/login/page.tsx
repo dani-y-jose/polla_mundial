@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import {
   createUserWithEmailAndPassword,
@@ -8,18 +8,20 @@ import {
   signInWithPopup,
   GoogleAuthProvider,
   signOut,
+  onAuthStateChanged,
   type User as FirebaseUser,
 } from "firebase/auth";
 import { auth, db } from "@/lib/firebase";
-import { doc, getDoc, runTransaction, arrayUnion } from "firebase/firestore";
+import { doc, getDoc, runTransaction } from "firebase/firestore";
 
-// What kind of invite (if any) admitted the visitor to the sign-up form.
+// The single /invites code (if any) that admitted the visitor to the sign-up
+// form. A group invite carries groupId + groupName; a generic admin invite has
+// groupId === null and shows remaining cupos instead.
 type InviteState =
   | { status: "none" }
   | { status: "checking" }
   | { status: "invalid"; reason: string }
-  | { status: "valid"; kind: "app"; code: string; remaining: number }
-  | { status: "valid"; kind: "group"; code: string; groupId: string; groupName: string };
+  | { status: "valid"; code: string; groupId: string | null; groupName?: string; remaining: number };
 
 export default function LoginPage() {
   const [isSignUp, setIsSignUp] = useState(false);
@@ -34,15 +36,22 @@ export default function LoginPage() {
   const [invite, setInvite] = useState<InviteState>({ status: "none" });
 
   const router = useRouter();
+  // Guards the auth listener from redirecting while a sign-up/sign-in we
+  // triggered here is still in flight (those flows redirect themselves).
+  const manualAuthInProgress = useRef(false);
 
-  // Resolve the invite from the URL (?invite=APPCODE or ?gcode=GROUPCODE) so we
-  // know whether to show the sign-up form and how to admit the new account.
+  // The invite code from the URL (?invite=CODE), captured once so both the
+  // resolver effect and the post-auth redirect use the same value.
+  const inviteCodeFromUrl = (() => {
+    if (typeof window === "undefined") return null;
+    return new URLSearchParams(window.location.search).get("invite")?.trim() || null;
+  })();
+
+  // Resolve the single invite from the URL (?invite=CODE) so we know whether to
+  // show the sign-up form and which group (if any) the account will be offered.
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const appCode = params.get("invite")?.trim();
-    const groupCode = params.get("gcode")?.trim().toUpperCase();
-
-    if (!appCode && !groupCode) {
+    const code = inviteCodeFromUrl;
+    if (!code) {
       setInvite({ status: "none" });
       return;
     }
@@ -52,56 +61,50 @@ export default function LoginPage() {
 
     (async () => {
       try {
-        if (appCode) {
-          const snap = await getDoc(doc(db, "invites", appCode));
-          if (!snap.exists()) {
-            setInvite({ status: "invalid", reason: "Esta invitación no existe." });
-            return;
-          }
-          const inv = snap.data();
-          const expMs = inv.expiresAt?.toMillis?.() ?? null;
-          if (inv.active === false) {
-            setInvite({ status: "invalid", reason: "Esta invitación fue desactivada." });
-          } else if (expMs !== null && expMs < Date.now()) {
-            setInvite({ status: "invalid", reason: "Esta invitación expiró." });
-          } else if ((inv.uses ?? 0) >= (inv.maxUses ?? 0)) {
-            setInvite({ status: "invalid", reason: "Esta invitación alcanzó su límite de usos." });
-          } else {
-            setInvite({
-              status: "valid",
-              kind: "app",
-              code: appCode,
-              remaining: (inv.maxUses ?? 0) - (inv.uses ?? 0),
-            });
-          }
+        const snap = await getDoc(doc(db, "invites", code));
+        if (!snap.exists()) {
+          setInvite({ status: "invalid", reason: "Esta invitación no existe." });
           return;
         }
-
-        // Group code: resolve it to a group via the public lookup table.
-        const codeSnap = await getDoc(doc(db, "inviteCodes", groupCode!));
-        if (!codeSnap.exists()) {
-          setInvite({ status: "invalid", reason: "El código de grupo no es válido." });
-          return;
+        const inv = snap.data();
+        const expMs = inv.expiresAt?.toMillis?.() ?? null;
+        if (inv.active === false) {
+          setInvite({ status: "invalid", reason: "Esta invitación fue desactivada." });
+        } else if (expMs !== null && expMs < Date.now()) {
+          setInvite({ status: "invalid", reason: "Esta invitación expiró." });
+        } else if ((inv.uses ?? 0) >= (inv.maxUses ?? 0)) {
+          setInvite({ status: "invalid", reason: "Esta invitación alcanzó su límite de usos." });
+        } else {
+          setInvite({
+            status: "valid",
+            code,
+            groupId: (inv.groupId as string | null) ?? null,
+            groupName: (inv.groupName as string | undefined) ?? undefined,
+            remaining: (inv.maxUses ?? 0) - (inv.uses ?? 0),
+          });
         }
-        const { groupId } = codeSnap.data() as { groupId: string };
-        let groupName = "tu grupo";
-        try {
-          const gSnap = await getDoc(doc(db, "groups", groupId));
-          if (gSnap.exists()) groupName = (gSnap.data().name as string) || groupName;
-        } catch {
-          // Group is member-only readable; the name is just nice-to-have.
-        }
-        setInvite({ status: "valid", kind: "group", code: groupCode!, groupId, groupName });
       } catch (err) {
         console.error(err);
         setInvite({ status: "invalid", reason: "No se pudo validar la invitación." });
       }
     })();
-  }, []);
+  }, [inviteCodeFromUrl]);
+
+  // If a user is already signed in and arrives via an invite link, send them
+  // straight to the dashboard, where the confirm-join card handles the group.
+  useEffect(() => {
+    const unsub = onAuthStateChanged(auth, (current) => {
+      if (current && !manualAuthInProgress.current && inviteCodeFromUrl) {
+        router.replace(`/dashboard?join=${encodeURIComponent(inviteCodeFromUrl)}`);
+      }
+    });
+    return () => unsub();
+  }, [router, inviteCodeFromUrl]);
 
   // Create the profile and consume the invite in one atomic transaction. The
   // Firestore rules only allow the profile to be written when the invite is
-  // consumed in the same commit, so this is the real enforcement point.
+  // consumed in the same commit, so this is the real enforcement point. The
+  // actual group join is deferred to the confirm-join card on the dashboard.
   const provisionProfile = async (fbUser: FirebaseUser) => {
     if (invite.status !== "valid") {
       throw new Error("Necesitas una invitación válida para registrarte.");
@@ -117,46 +120,45 @@ export default function LoginPage() {
       totalPoints: 0,
       exactGuesses: 0,
     };
+    const code = invite.code;
 
     await runTransaction(db, async (tx) => {
-      if (invite.kind === "app") {
-        const invRef = doc(db, "invites", invite.code);
-        const invSnap = await tx.get(invRef);
-        if (!invSnap.exists()) throw new Error("La invitación ya no existe.");
-        const inv = invSnap.data();
-        const expMs = inv.expiresAt?.toMillis?.() ?? null;
-        if (inv.active === false) throw new Error("Esta invitación fue desactivada.");
-        if (expMs !== null && expMs < Date.now()) throw new Error("Esta invitación expiró.");
-        if ((inv.uses ?? 0) >= (inv.maxUses ?? 0)) throw new Error("Esta invitación alcanzó su límite de usos.");
-        const consumedBy: string[] = inv.consumedBy ?? [];
-        if (consumedBy.includes(fbUser.uid)) throw new Error("Ya usaste esta invitación.");
+      const invRef = doc(db, "invites", code);
+      const invSnap = await tx.get(invRef);
+      if (!invSnap.exists()) throw new Error("La invitación ya no existe.");
+      const inv = invSnap.data();
+      const expMs = inv.expiresAt?.toMillis?.() ?? null;
+      if (inv.active === false) throw new Error("Esta invitación fue desactivada.");
+      if (expMs !== null && expMs < Date.now()) throw new Error("Esta invitación expiró.");
+      if ((inv.uses ?? 0) >= (inv.maxUses ?? 0)) throw new Error("Esta invitación alcanzó su límite de usos.");
+      const consumedBy: string[] = inv.consumedBy ?? [];
+      if (consumedBy.includes(fbUser.uid)) throw new Error("Ya usaste esta invitación.");
 
-        tx.set(doc(db, "users", fbUser.uid), { ...baseProfile, inviteId: invite.code });
-        tx.update(invRef, {
-          uses: (inv.uses ?? 0) + 1,
-          consumedBy: [...consumedBy, fbUser.uid],
-        });
-      } else {
-        // Group invite: create the profile and join the group together. We
-        // can't read the group yet (read is member-only), so add ourselves
-        // blindly with arrayUnion — the rules permit a user adding only their
-        // own uid to members, exactly like the existing join flow.
-        tx.set(doc(db, "users", fbUser.uid), { ...baseProfile, inviteCodeUsed: invite.code });
-        tx.update(doc(db, "groups", invite.groupId), { members: arrayUnion(fbUser.uid) });
-      }
+      tx.set(doc(db, "users", fbUser.uid), { ...baseProfile, inviteId: code });
+      tx.update(invRef, {
+        uses: (inv.uses ?? 0) + 1,
+        consumedBy: [...consumedBy, fbUser.uid],
+      });
     });
   };
+
+  // Where to land after auth: the dashboard, with the invite code as ?join so
+  // the confirm-join card can offer the group (no-op for generic invites).
+  const dashboardTarget = () =>
+    inviteCodeFromUrl ? `/dashboard?join=${encodeURIComponent(inviteCodeFromUrl)}` : "/dashboard";
 
   const handleAuth = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     setError("");
+    manualAuthInProgress.current = true;
 
     try {
       if (isSignUp) {
         if (invite.status !== "valid") {
           setError("Necesitas una invitación válida para registrarte.");
           setLoading(false);
+          manualAuthInProgress.current = false;
           return;
         }
         const userCredential = await createUserWithEmailAndPassword(auth, email, password);
@@ -168,12 +170,13 @@ export default function LoginPage() {
           await userCredential.user.delete().catch(() => {});
           throw provisionErr;
         }
-        router.push("/dashboard");
+        router.push(dashboardTarget());
       } else {
         await signInWithEmailAndPassword(auth, email, password);
-        router.push("/dashboard");
+        router.push(dashboardTarget());
       }
     } catch (err: any) {
+      manualAuthInProgress.current = false;
       setError(err.message || "Error al autenticar");
     } finally {
       setLoading(false);
@@ -183,6 +186,7 @@ export default function LoginPage() {
   const handleGoogleSignIn = async () => {
     setLoading(true);
     setError("");
+    manualAuthInProgress.current = true;
 
     try {
       const provider = new GoogleAuthProvider();
@@ -196,13 +200,15 @@ export default function LoginPage() {
           await signOut(auth);
           setError("Necesitas una invitación válida para crear una cuenta.");
           setLoading(false);
+          manualAuthInProgress.current = false;
           return;
         }
         await provisionProfile(user);
       }
 
-      router.push("/dashboard");
+      router.push(dashboardTarget());
     } catch (err: any) {
+      manualAuthInProgress.current = false;
       console.error(err);
       setError(err.message || "Error al iniciar sesión con Google");
     } finally {
@@ -240,8 +246,8 @@ export default function LoginPage() {
         )}
         {isSignUp && invite.status === "valid" && (
           <div className="mb-4 p-3 bg-emerald-500/15 border border-emerald-500/40 text-emerald-200 rounded-lg text-sm">
-            {invite.kind === "group"
-              ? <>Invitación válida 🎉 Al registrarte te unirás a <span className="font-bold">{invite.groupName}</span>.</>
+            {invite.groupId
+              ? <>Invitación válida 🎉 Al registrarte podrás unirte a <span className="font-bold">{invite.groupName || "tu grupo"}</span>.</>
               : <>Invitación válida 🎉 {invite.remaining} {invite.remaining === 1 ? "cupo disponible" : "cupos disponibles"}.</>}
           </div>
         )}

@@ -5,12 +5,14 @@ import { useRouter } from "next/navigation";
 import { onAuthStateChanged } from "firebase/auth";
 import { auth, db } from "@/lib/firebase";
 import { collection, getDocs, doc, getDoc, query, where, updateDoc, arrayUnion, writeBatch } from "firebase/firestore";
-import { Group } from "@/types";
+import { Group, Invite } from "@/types";
+import { getMaxMembersPerGroup, DEFAULT_MAX_MEMBERS_PER_GROUP } from "@/lib/config";
 
 export default function GroupsPage() {
   const [user, setUser] = useState<any>(null);
   const [dbUser, setDbUser] = useState<any>(null);
   const [groups, setGroups] = useState<Group[]>([]);
+  const [maxMembers, setMaxMembers] = useState(DEFAULT_MAX_MEMBERS_PER_GROUP);
   const [loading, setLoading] = useState(true);
   
   // Forms State
@@ -57,6 +59,9 @@ export default function GroupsPage() {
           groupsData.push({ id: doc.id, ...doc.data() } as Group);
         });
         setGroups(groupsData);
+
+        // Global member cap (admin-configurable), for capacity display + invite maxUses.
+        setMaxMembers(await getMaxMembersPerGroup());
       } catch (err) {
         console.error("Error fetching groups:", err);
       } finally {
@@ -81,7 +86,10 @@ export default function GroupsPage() {
       }
 
       const groupId = `group_${Date.now()}`;
-      
+      // Snapshot the global member cap as the invite's maxUses (rules require
+      // maxUses to equal the live cap, so read it right before writing).
+      const cap = await getMaxMembersPerGroup();
+
       // Generate a unique-ish 6-character uppercase alphanumeric code
       const characters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
       let code = "";
@@ -89,9 +97,9 @@ export default function GroupsPage() {
         code += characters.charAt(Math.floor(Math.random() * characters.length));
       }
 
-      // Ensure the invite code is unique (it is the doc id in the public inviteCodes lookup).
+      // Ensure the invite code is unique (it is the doc id in /invites).
       for (let attempt = 0; attempt < 5; attempt++) {
-        const existing = await getDoc(doc(db, "inviteCodes", code));
+        const existing = await getDoc(doc(db, "invites", code));
         if (!existing.exists()) break;
         code = "";
         for (let i = 0; i < 6; i++) {
@@ -122,9 +130,23 @@ export default function GroupsPage() {
         }
       };
 
+      const groupInvite: Invite = {
+        code,
+        type: "group",
+        groupId,
+        groupName: newGroup.name,
+        maxUses: cap,
+        uses: 0,
+        consumedBy: [],
+        expiresAt: null,
+        active: true,
+        createdBy: user.uid,
+        createdAt: new Date(),
+      };
+
       const batch = writeBatch(db);
       batch.set(doc(db, "groups", groupId), newGroup);
-      batch.set(doc(db, "inviteCodes", code), { code, groupId });
+      batch.set(doc(db, "invites", code), groupInvite);
       await batch.commit();
       setGroups([...groups, newGroup]);
       setNewGroupName("");
@@ -155,20 +177,26 @@ export default function GroupsPage() {
     setError("");
 
     try {
-      const codeSnap = await getDoc(doc(db, "inviteCodes", cleanCode));
-      if (!codeSnap.exists()) {
+      const codeSnap = await getDoc(doc(db, "invites", cleanCode));
+      const groupId = codeSnap.exists() ? (codeSnap.data().groupId as string | null) : null;
+      if (!groupId) {
         setError("Código de invitación inválido. Grupo no encontrado.");
         setJoinLoading(false);
         return;
       }
 
-      const { groupId } = codeSnap.data() as { groupId: string };
-
       // Adding only ourselves is permitted by the rules even before we can read
-      // the group (idempotent if we are already a member).
-      await updateDoc(doc(db, "groups", groupId), {
-        members: arrayUnion(user.uid)
-      });
+      // the group (idempotent if we are already a member). A rejection here
+      // means the group has hit the global member cap.
+      try {
+        await updateDoc(doc(db, "groups", groupId), {
+          members: arrayUnion(user.uid)
+        });
+      } catch {
+        setError("Este grupo ya está lleno.");
+        setJoinLoading(false);
+        return;
+      }
 
       router.push(`/groups/${groupId}`);
     } catch (err: any) {
@@ -223,20 +251,38 @@ export default function GroupsPage() {
             ) : (
               <div className="grid gap-4">
                 {groups.map((group) => (
-                  <div 
+                  <div
                     key={group.id}
-                    onClick={() => router.push(`/groups/${group.id}`)}
-                    className="p-6 bg-white/5 hover:bg-white/10 border border-white/10 rounded-2xl flex justify-between items-center cursor-pointer transition-all hover:scale-[1.01] duration-200 group"
+                    className="p-6 bg-white/5 border border-white/10 rounded-2xl space-y-4 transition-all duration-200 group"
                   >
-                    <div>
-                      <h3 className="text-xl font-bold group-hover:text-emerald-400 transition-colors">{group.name}</h3>
-                      <div className="text-sm text-gray-400 mt-2">
-                        {group.members.length} {group.members.length === 1 ? 'miembro' : 'miembros'} • Código de Invitación: <span className="font-mono text-purple-400 font-bold">{group.inviteCode}</span>
+                    <div
+                      onClick={() => router.push(`/groups/${group.id}`)}
+                      className="flex justify-between items-center cursor-pointer"
+                    >
+                      <div>
+                        <h3 className="text-xl font-bold group-hover:text-emerald-400 transition-colors">{group.name}</h3>
+                        <div className="text-sm text-gray-400 mt-2">
+                          {group.members.length} / {maxMembers} miembros • Código: <span className="font-mono text-purple-400 font-bold">{group.inviteCode}</span>
+                        </div>
+                      </div>
+                      <div className="h-10 w-10 bg-white/10 rounded-full flex items-center justify-center group-hover:bg-emerald-600 transition-colors text-white font-bold">
+                        →
                       </div>
                     </div>
-                    <div className="h-10 w-10 bg-white/10 rounded-full flex items-center justify-center group-hover:bg-emerald-600 transition-colors text-white font-bold">
-                      →
-                    </div>
+                    <a
+                      onClick={(e) => e.stopPropagation()}
+                      href={`https://api.whatsapp.com/send?text=${encodeURIComponent(
+                        `¡Únete a mi grupo de apuestas en La Polla Mundial 2026! ⚽🏆\n\nGrupo: *${group.name}*\nCódigo de Invitación: *${group.inviteCode}*\nInscripción: *${group.entryFee ? `$${group.entryFee.toLocaleString()}` : "Gratis"}*\n\nRegístrate e ingresa tus pronósticos aquí: ${typeof window !== 'undefined' ? window.location.origin : ''}/login?invite=${group.inviteCode}`
+                      )}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex items-center justify-center gap-2 w-full py-2 bg-[#25D366] hover:bg-[#1ebe5b] text-black font-bold rounded-lg transition-all text-sm"
+                    >
+                      <svg viewBox="0 0 24 24" className="h-4 w-4 fill-current" aria-hidden="true">
+                        <path d="M.057 24l1.687-6.163a11.867 11.867 0 01-1.587-5.946C.16 5.335 5.495 0 12.05 0a11.817 11.817 0 018.413 3.488 11.824 11.824 0 013.48 8.414c-.003 6.557-5.338 11.892-11.893 11.892a11.9 11.9 0 01-5.688-1.448L.057 24zm6.597-3.807c1.676.995 3.276 1.591 5.392 1.592 5.448 0 9.886-4.434 9.889-9.885.002-5.462-4.415-9.89-9.881-9.892-5.452 0-9.887 4.434-9.889 9.884a9.86 9.86 0 001.51 5.26l-.999 3.648 3.477-.911zm11.387-5.464c-.074-.124-.272-.198-.57-.347-.297-.149-1.758-.868-2.031-.967-.272-.099-.47-.149-.669.149-.198.297-.768.967-.941 1.165-.173.198-.347.223-.644.074-.297-.149-1.255-.462-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.297-.347.446-.521.151-.172.2-.296.3-.495.099-.198.05-.372-.025-.521-.075-.148-.669-1.611-.916-2.206-.242-.579-.487-.501-.669-.51l-.57-.01c-.198 0-.52.074-.792.372s-1.04 1.016-1.04 2.479 1.065 2.876 1.213 3.074c.149.198 2.095 3.2 5.076 4.487.709.306 1.263.489 1.694.626.712.226 1.36.194 1.872.118.571-.085 1.758-.719 2.006-1.413.248-.695.248-1.29.173-1.414z"/>
+                      </svg>
+                      Compartir por WhatsApp
+                    </a>
                   </div>
                 ))}
               </div>
