@@ -53,6 +53,40 @@ const getMatchGroupLetter = (match: Match): string | null => {
   return m ? m[1].toUpperCase() : null;
 };
 
+// Shared "active group" picker. The selection (`selectedGroup`) is global to the
+// dashboard, so the same control appears in Inicio, Pronósticos and Tabla and
+// switching it anywhere updates every tab. Renders nothing when the user has no
+// groups. `label` lets each tab title the control in context.
+function GroupSelector({
+  groups,
+  selectedGroup,
+  onChange,
+  label,
+}: {
+  groups: Group[];
+  selectedGroup: Group | null;
+  onChange: (groupId: string) => void;
+  label: string;
+}) {
+  if (groups.length === 0) return null;
+  return (
+    <div className="space-y-1">
+      <label className="text-[10px] text-gray-500 uppercase tracking-wider font-semibold">{label}</label>
+      <select
+        value={selectedGroup?.id || ""}
+        onChange={(e) => onChange(e.target.value)}
+        className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 text-sm font-bold text-emerald-400"
+      >
+        {groups.map(group => (
+          <option key={group.id} value={group.id} className="bg-neutral-950 text-white">
+            {group.name} ({group.inviteCode})
+          </option>
+        ))}
+      </select>
+    </div>
+  );
+}
+
 export default function UnifiedDashboard() {
   const [activeTab, setActiveTab] = useState<Tab>("home");
   
@@ -867,7 +901,15 @@ export default function UnifiedDashboard() {
           {/* TAB 1: INICIO (HOME) */}
           {activeTab === "home" && (
             <div className="space-y-6">
-              
+
+              {/* Active group selector — shared across Inicio, Pronósticos y Tabla */}
+              <GroupSelector
+                groups={groups}
+                selectedGroup={selectedGroup}
+                onChange={handleGroupChange}
+                label="Grupo Activo"
+              />
+
               {/* Champion Card */}
               <div className="p-6 bg-gradient-to-br from-emerald-600 to-indigo-900 rounded-2xl border border-white/10 shadow-lg space-y-4">
                 <div>
@@ -1108,7 +1150,15 @@ export default function UnifiedDashboard() {
           {/* TAB 2: PRONÓSTICOS */}
           {activeTab === "predictions" && (
             <div className="space-y-4">
-              
+
+              {/* Active group selector — pronósticos are saved per group */}
+              <GroupSelector
+                groups={groups}
+                selectedGroup={selectedGroup}
+                onChange={handleGroupChange}
+                label="Grupo Activo"
+              />
+
               {/* Filter Pills */}
               <div className="border-b border-white/5 pb-4 space-y-2">
                 <div className="flex flex-wrap items-center gap-1.5 justify-center">
@@ -1320,22 +1370,12 @@ export default function UnifiedDashboard() {
             <div className="space-y-4">
               
               {/* Group Selector Dropdown */}
-              {groups.length > 0 && (
-                <div className="space-y-1">
-                  <label className="text-[10px] text-gray-500 uppercase tracking-wider font-semibold">Grupo de Posiciones</label>
-                  <select 
-                    value={selectedGroup?.id || ""} 
-                    onChange={(e) => handleGroupChange(e.target.value)}
-                    className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 text-sm font-bold text-emerald-400"
-                  >
-                    {groups.map(group => (
-                      <option key={group.id} value={group.id} className="bg-neutral-950 text-white">
-                        {group.name} ({group.inviteCode})
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              )}
+              <GroupSelector
+                groups={groups}
+                selectedGroup={selectedGroup}
+                onChange={handleGroupChange}
+                label="Grupo de Posiciones"
+              />
 
               {selectedGroup && (
                 <div className="p-4 bg-white/5 border border-white/10 rounded-xl space-y-3 text-xs">
@@ -1471,8 +1511,13 @@ export default function UnifiedDashboard() {
           {activeTab === "groups" && (
             <div className="space-y-6">
 
-              <div className="flex items-center justify-between">
+              <div className="space-y-1">
                 <h2 className="font-bold text-sm text-gray-400 uppercase tracking-wider">Mis Grupos ({groups.length})</h2>
+                {selectedGroup && (
+                  <p className="text-[10px] text-gray-500">
+                    Grupo activo: <span className="font-bold text-emerald-400">{selectedGroup.name}</span> · se usa en Inicio, Pronósticos y Tabla.
+                  </p>
+                )}
               </div>
 
               {groupFormError && (
@@ -1486,17 +1531,30 @@ export default function UnifiedDashboard() {
                 <p className="text-gray-500 text-xs italic">Aún no perteneces a ningún grupo. Únete con un código o crea uno nuevo abajo.</p>
               ) : (
                 <div className="space-y-2">
-                  {groups.map((group) => (
+                  {groups.map((group) => {
+                    const isActive = selectedGroup?.id === group.id;
+                    return (
                     <div
                       key={group.id}
-                      className="p-4 bg-white/5 border border-white/10 rounded-2xl space-y-3 text-xs"
+                      className={`p-4 rounded-2xl space-y-3 text-xs border ${
+                        isActive
+                          ? "bg-emerald-500/5 border-emerald-500/30 ring-1 ring-emerald-500/20"
+                          : "bg-white/5 border-white/10"
+                      }`}
                     >
                       <div
                         onClick={() => router.push(`/groups/${group.id}`)}
                         className="flex justify-between items-center cursor-pointer group"
                       >
                         <div>
-                          <h3 className="font-bold text-white text-sm group-hover:text-emerald-400 transition-colors">{group.name}</h3>
+                          <div className="flex items-center gap-2">
+                            <h3 className="font-bold text-white text-sm group-hover:text-emerald-400 transition-colors">{group.name}</h3>
+                            {isActive && (
+                              <span className="px-2 py-0.5 bg-emerald-500/20 border border-emerald-500/30 text-emerald-300 text-[8px] font-black rounded-full uppercase tracking-wider shrink-0">
+                                ✓ Activo
+                              </span>
+                            )}
+                          </div>
                           <div className="text-gray-500 text-[10px] mt-1">
                             {group.members.length} / {maxMembers} miembros • Código: <span className="font-mono text-purple-400 font-bold">{group.inviteCode}</span>
                           </div>
@@ -1505,6 +1563,14 @@ export default function UnifiedDashboard() {
                           →
                         </div>
                       </div>
+                      {!isActive && (
+                        <button
+                          onClick={() => handleGroupChange(group.id)}
+                          className="w-full py-2 bg-white/5 hover:bg-emerald-500/10 border border-white/10 hover:border-emerald-500/30 text-gray-300 hover:text-emerald-300 font-bold rounded-lg transition-all text-[11px] uppercase tracking-wider"
+                        >
+                          Marcar como grupo activo
+                        </button>
+                      )}
                       <a
                         onClick={(e) => e.stopPropagation()}
                         href={`https://api.whatsapp.com/send?text=${encodeURIComponent(
@@ -1520,7 +1586,8 @@ export default function UnifiedDashboard() {
                         Compartir por WhatsApp
                       </a>
                     </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
 
