@@ -3,21 +3,17 @@ import Link from "next/link";
 export default function Home() {
   return (
     <div className="min-h-screen bg-black text-white selection:bg-blue-500/30 flex flex-col font-sans">
-      <main className="flex-1 flex flex-col items-center justify-start relative overflow-hidden px-6 pt-[12vh] sm:pt-[14vh]">
+      <main className="flex-1 flex flex-col items-center justify-center relative overflow-hidden px-6 py-10 gap-2">
         {/* Abstract Background Gradients */}
         <div className="absolute top-1/4 -left-20 w-96 h-96 bg-blue-600/30 rounded-full mix-blend-screen filter blur-3xl opacity-50 animate-blob"></div>
         <div className="absolute top-1/3 -right-20 w-96 h-96 bg-purple-600/30 rounded-full mix-blend-screen filter blur-3xl opacity-50 animate-blob animation-delay-2000"></div>
         <div className="absolute -bottom-32 left-1/2 w-96 h-96 bg-emerald-600/30 rounded-full mix-blend-screen filter blur-3xl opacity-50 animate-blob animation-delay-4000"></div>
 
-        {/* Mascot backdrop — anchored at the bottom of the hero */}
-        <div
-          aria-hidden
-          className="pointer-events-none absolute inset-x-0 bottom-0 z-0 h-[50%] sm:h-[62%] bg-[url('/mascots.png')] bg-contain bg-bottom bg-no-repeat opacity-95"
-        />
-        {/* Seat the mascots' feet into the page and keep copy legible */}
-        <div
-          aria-hidden
-          className="pointer-events-none absolute inset-0 z-0 bg-gradient-to-b from-black via-black/50 to-black/85"
+        {/* Mascots — crisp foreground banner at the top of the hero */}
+        <img
+          src="/mascots.png"
+          alt="Mascotas del Mundial 2026"
+          className="relative z-10 w-full max-w-2xl select-none pointer-events-none drop-shadow-2xl"
         />
 
         <div className="relative z-10 text-center max-w-3xl mx-auto space-y-8">
