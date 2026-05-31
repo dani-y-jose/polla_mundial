@@ -271,7 +271,7 @@ export default function GroupDetailPage() {
         <div className="max-w-md text-center space-y-4">
           <h1 className="text-2xl font-bold text-red-400">Error</h1>
           <p className="text-gray-400">{error || "Algo salió mal."}</p>
-          <button onClick={() => router.push("/groups")} className="px-6 py-2 bg-emerald-600 hover:bg-emerald-500 rounded-lg text-sm font-semibold transition-all">
+          <button onClick={() => router.push("/dashboard")} className="px-6 py-2 bg-emerald-600 hover:bg-emerald-500 rounded-lg text-sm font-semibold transition-all">
             Volver a Mis Grupos
           </button>
         </div>
@@ -298,8 +298,8 @@ export default function GroupDetailPage() {
           </div>
 
           <div className="flex items-center gap-4">
-            <button 
-              onClick={() => router.push("/groups")} 
+            <button
+              onClick={() => router.push("/dashboard")}
               className="text-gray-400 hover:text-emerald-400 transition-colors font-medium text-sm"
             >
               ← Mis Grupos
