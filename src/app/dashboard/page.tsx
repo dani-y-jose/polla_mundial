@@ -44,6 +44,15 @@ const RESOLUTION_TRANSLATIONS: Record<string, string> = {
   penalties: "Penales"
 };
 
+// Group-stage matches encode their group letter in the seeded id, e.g.
+// "wc26_a_mexico_vs_sudafrica" → "A". Returns null for matches that don't
+// follow the seed convention (e.g. manually-created ones), so they're only
+// ever shown under the "all groups" option.
+const getMatchGroupLetter = (match: Match): string | null => {
+  const m = /^wc26_([a-l])_/i.exec(match.id);
+  return m ? m[1].toUpperCase() : null;
+};
+
 export default function UnifiedDashboard() {
   const [activeTab, setActiveTab] = useState<Tab>("home");
   
@@ -68,6 +77,8 @@ export default function UnifiedDashboard() {
   const [selectedChampion, setSelectedChampion] = useState("");
   const [championSaved, setChampionSaved] = useState(false);
   const [predictionFilter, setPredictionFilter] = useState<"all" | "group" | "round_of_16" | "quarter_finals" | "semi_finals" | "finals">("all");
+  // Sub-filter for the "Grupos" phase: a group letter ("A".."L") or "all".
+  const [groupLetterFilter, setGroupLetterFilter] = useState<string>("all");
   const [predictionPage, setPredictionPage] = useState(1);
   const [searchQuery, setSearchQuery] = useState("");
   
@@ -402,10 +413,17 @@ export default function UnifiedDashboard() {
     }
   };
 
-  // Reset to the first page whenever the phase filter changes.
+  // Reset to the first page whenever the phase filter changes, and drop any
+  // group-letter sub-filter (it only applies to the "Grupos" phase).
   useEffect(() => {
     setPredictionPage(1);
+    setGroupLetterFilter("all");
   }, [predictionFilter]);
+
+  // Reset to the first page whenever the group-letter sub-filter changes.
+  useEffect(() => {
+    setPredictionPage(1);
+  }, [groupLetterFilter]);
 
   // The prediction to show for a match in the currently selected group: the one
   // saved for this group if it exists, otherwise an editable prefill copied from
@@ -750,9 +768,21 @@ export default function UnifiedDashboard() {
 
   // Paginate the predictions list so the bottom of the page stays reachable.
   const PREDICTIONS_PER_PAGE = 10;
-  const filteredPredictionMatches = matches.filter(m =>
-    predictionFilter === "all" ? true : m.phase === predictionFilter
-  );
+  // Group letters present among the group-stage matches, e.g. ["A","B",...],
+  // used to build the per-group sub-filter pills shown under "Grupos".
+  const groupLetters = Array.from(
+    new Set(
+      matches
+        .filter(m => m.phase === "group")
+        .map(getMatchGroupLetter)
+        .filter((l): l is string => l !== null)
+    )
+  ).sort();
+  const filteredPredictionMatches = matches.filter(m => {
+    if (predictionFilter !== "all" && m.phase !== predictionFilter) return false;
+    if (predictionFilter === "group" && groupLetterFilter !== "all" && getMatchGroupLetter(m) !== groupLetterFilter) return false;
+    return true;
+  });
   const totalPredictionPages = Math.max(1, Math.ceil(filteredPredictionMatches.length / PREDICTIONS_PER_PAGE));
   const safePredictionPage = Math.min(predictionPage, totalPredictionPages);
   const pagedPredictionMatches = filteredPredictionMatches.slice(
@@ -1008,8 +1038,9 @@ export default function UnifiedDashboard() {
             <div className="space-y-4">
               
               {/* Filter Pills */}
-              <div className="flex flex-wrap items-center gap-1.5 justify-center border-b border-white/5 pb-4">
-                <button 
+              <div className="border-b border-white/5 pb-4 space-y-2">
+                <div className="flex flex-wrap items-center gap-1.5 justify-center">
+                <button
                   onClick={() => setPredictionFilter("all")}
                   className={`px-2.5 py-1 text-[10px] font-bold rounded-full transition-all uppercase tracking-wider ${predictionFilter === "all" ? "bg-emerald-500 text-black" : "bg-white/5 text-gray-400 hover:text-white"}`}
                 >
@@ -1045,6 +1076,28 @@ export default function UnifiedDashboard() {
                 >
                   Final
                 </button>
+                </div>
+
+                {/* Per-group sub-filter (only under the "Grupos" phase) */}
+                {predictionFilter === "group" && groupLetters.length > 0 && (
+                  <div className="flex flex-wrap items-center gap-1.5 justify-center">
+                    <button
+                      onClick={() => setGroupLetterFilter("all")}
+                      className={`px-2.5 py-1 text-[10px] font-bold rounded-full transition-all uppercase tracking-wider ${groupLetterFilter === "all" ? "bg-indigo-500 text-white" : "bg-white/5 text-gray-400 hover:text-white"}`}
+                    >
+                      Todos
+                    </button>
+                    {groupLetters.map(letter => (
+                      <button
+                        key={letter}
+                        onClick={() => setGroupLetterFilter(letter)}
+                        className={`px-2.5 py-1 text-[10px] font-bold rounded-full transition-all uppercase tracking-wider ${groupLetterFilter === letter ? "bg-indigo-500 text-white" : "bg-white/5 text-gray-400 hover:text-white"}`}
+                      >
+                        Grupo {letter}
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
 
               {/* Group block alert */}
