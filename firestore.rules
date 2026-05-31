@@ -1,0 +1,144 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ---- Helpers ----
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return isSignedIn()
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.isAdmin == true;
+    }
+
+    // Champions are locked at the opening match (2026-06-11 20:00 UTC).
+    function championDeadline() {
+      return timestamp.date(2026, 6, 11) + duration.value(20, 'h');
+    }
+
+    // A match is open for predictions only while it is still 'upcoming'
+    // and kickoff has not yet passed.
+    function matchOpen(matchId) {
+      let m = get(/databases/$(database)/documents/matches/$(matchId)).data;
+      return m.status == 'upcoming' && m.kickoffTime > request.time;
+    }
+
+    // Diff helper: the set of fields changed by this write.
+    function changed(resourceData) {
+      return request.resource.data.diff(resourceData).affectedKeys();
+    }
+
+    // ---- Users ----
+    match /users/{userId} {
+      // Any signed-in user can read profiles (needed for leaderboards).
+      allow read: if isSignedIn();
+
+      // On sign-up a user creates only their own doc and may never self-grant admin.
+      allow create: if isSignedIn()
+        && request.auth.uid == userId
+        && request.resource.data.isAdmin == false;
+
+      // Admins may update any profile (e.g. recomputed totalPoints/exactGuesses).
+      // A user may update only their own whitelisted profile fields — never
+      // isAdmin, email, totalPoints or exactGuesses — and may only change their
+      // champion pick before the deadline.
+      allow update: if isAdmin() || (
+        request.auth.uid == userId
+        && changed(resource.data).hasOnly(['displayName', 'city', 'neighborhood', 'age', 'champion'])
+        && (!changed(resource.data).hasAny(['champion']) || request.time < championDeadline())
+      );
+
+      // Only admins delete profiles.
+      allow delete: if isAdmin();
+
+      // ---- Notifications (per-user subcollection) ----
+      match /notifications/{notifId} {
+        // Owner reads their own; admins read all.
+        allow read: if request.auth.uid == userId || isAdmin();
+        // Only admins create notifications (e.g. score-update fan-out).
+        allow create: if isAdmin();
+        // Owner may only flip the read flag; admins may do anything.
+        allow update: if isAdmin() || (
+          request.auth.uid == userId && changed(resource.data).hasOnly(['read'])
+        );
+        allow delete: if request.auth.uid == userId || isAdmin();
+      }
+    }
+
+    // ---- Matches ----
+    match /matches/{matchId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    // ---- Predictions ----
+    match /predictions/{predictionId} {
+      // Any signed-in user can read predictions (needed for leaderboards).
+      allow read: if isSignedIn();
+
+      // Users create predictions only for themselves, only while the match is
+      // open, and may never set their own points.
+      allow create: if isSignedIn()
+        && request.resource.data.userId == request.auth.uid
+        && request.resource.data.pointsEarned == null
+        && matchOpen(request.resource.data.matchId);
+
+      // Users may edit their own prediction only while the match is still open,
+      // and may not change ownership, the match, or the points.
+      // Admins (scoring) may write points freely.
+      allow update: if isAdmin() || (
+        isSignedIn()
+        && resource.data.userId == request.auth.uid
+        && request.resource.data.userId == resource.data.userId
+        && request.resource.data.matchId == resource.data.matchId
+        && request.resource.data.pointsEarned == resource.data.pointsEarned
+        && matchOpen(resource.data.matchId)
+      );
+
+      allow delete: if isAdmin();
+    }
+
+    // ---- Groups ----
+    match /groups/{groupId} {
+      // Only members (and admins) can read a group.
+      allow read: if isSignedIn() && (
+        request.auth.uid in resource.data.members || isAdmin()
+      );
+
+      // Creator sets themselves as the sole initial member.
+      allow create: if isSignedIn()
+        && request.resource.data.creatorId == request.auth.uid
+        && request.resource.data.members == [request.auth.uid];
+
+      // Update is allowed when:
+      //  - a user adds only themselves to members (joining via invite code), or
+      //  - the creator edits the group, or
+      //  - an admin edits the group.
+      allow update: if isSignedIn() && (
+        (
+          changed(resource.data).hasOnly(['members'])
+          && request.resource.data.members.hasAll(resource.data.members)
+          && request.resource.data.members.hasOnly(resource.data.members.concat([request.auth.uid]))
+        )
+        || resource.data.creatorId == request.auth.uid
+        || isAdmin()
+      );
+
+      allow delete: if isSignedIn() && (
+        resource.data.creatorId == request.auth.uid || isAdmin()
+      );
+    }
+
+    // ---- Invite codes ----
+    // Public lookup that maps an invite code -> groupId so a user can resolve a
+    // code to a group without being able to read every group. Doc id is the code.
+    match /inviteCodes/{code} {
+      allow read: if isSignedIn();
+      // Claim a code only if it is not already taken.
+      allow create: if isSignedIn() && resource == null;
+      allow update, delete: if isAdmin();
+    }
+  }
+}
