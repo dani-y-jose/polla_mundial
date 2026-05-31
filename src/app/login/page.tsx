@@ -117,8 +117,6 @@ export default function LoginPage() {
       age: age ? parseInt(age, 10) : undefined,
       city: city || undefined,
       neighborhood: neighborhood || undefined,
-      totalPoints: 0,
-      exactGuesses: 0,
     };
     const code = invite.code;
 

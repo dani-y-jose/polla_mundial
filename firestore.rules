@@ -25,6 +25,13 @@ service cloud.firestore {
       return m.status == 'upcoming' && m.kickoffTime > request.time;
     }
 
+    // True when the requesting user is a member of the given group. Predictions
+    // and champion picks are scoped per group, so only members may write them.
+    function isGroupMember(groupId) {
+      return exists(/databases/$(database)/documents/groups/$(groupId))
+        && request.auth.uid in get(/databases/$(database)/documents/groups/$(groupId)).data.members;
+    }
+
     // Diff helper: the set of fields changed by this write.
     function changed(resourceData) {
       return request.resource.data.diff(resourceData).affectedKeys();
@@ -113,24 +120,42 @@ service cloud.firestore {
       // Any signed-in user can read predictions (needed for leaderboards).
       allow read: if isSignedIn();
 
-      // Users create predictions only for themselves, only while the match is
-      // open, and may never set their own points.
+      // Users create predictions only for themselves, scoped to a group they
+      // belong to, only while the match is open, and may never set their points.
       allow create: if isSignedIn()
         && request.resource.data.userId == request.auth.uid
         && request.resource.data.pointsEarned == null
+        && isGroupMember(request.resource.data.groupId)
         && matchOpen(request.resource.data.matchId);
 
       // Users may edit their own prediction only while the match is still open,
-      // and may not change ownership, the match, or the points.
+      // and may not change ownership, the group, the match, or the points.
       // Admins (scoring) may write points freely.
       allow update: if isAdmin() || (
         isSignedIn()
         && resource.data.userId == request.auth.uid
         && request.resource.data.userId == resource.data.userId
+        && request.resource.data.groupId == resource.data.groupId
         && request.resource.data.matchId == resource.data.matchId
         && request.resource.data.pointsEarned == resource.data.pointsEarned
         && matchOpen(resource.data.matchId)
       );
+
+      allow delete: if isAdmin();
+    }
+
+    // ---- Champions (per-group champion pick) ----
+    // One pick per (user, group); doc id is `${userId}_${groupId}`. Display-only.
+    match /champions/{championId} {
+      // Any signed-in user can read (needed for leaderboard display).
+      allow read: if isSignedIn();
+
+      // Users write only their own pick, for a group they belong to, and only
+      // before the champion deadline.
+      allow create, update: if isSignedIn()
+        && request.resource.data.userId == request.auth.uid
+        && isGroupMember(request.resource.data.groupId)
+        && request.time < championDeadline();
 
       allow delete: if isAdmin();
     }

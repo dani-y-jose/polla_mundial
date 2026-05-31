@@ -144,15 +144,13 @@ export default function GroupDetailPage() {
         });
         setMatches(matchesData);
 
-        // 4. Fetch Predictions made by any of the group members
+        // 4. Fetch this group's predictions (predictions are scoped by groupId).
         const predsData: Prediction[] = [];
-        for (const chunk of chunks) {
-          const pQuery = query(collection(db, "predictions"), where("userId", "in", chunk));
-          const pSnapshot = await getDocs(pQuery);
-          pSnapshot.forEach((doc) => {
-            predsData.push({ id: doc.id, ...doc.data() } as Prediction);
-          });
-        }
+        const pQuery = query(collection(db, "predictions"), where("groupId", "==", groupId));
+        const pSnapshot = await getDocs(pQuery);
+        pSnapshot.forEach((doc) => {
+          predsData.push({ id: doc.id, ...doc.data() } as Prediction);
+        });
         setAllPredictions(predsData);
 
         // 5. Calculate scores dynamically per group rules
@@ -165,7 +163,7 @@ export default function GroupDetailPage() {
           finalsBonus: 0
         };
         const activeRules = groupData.rules || defaultRules;
-        const calculatedScores = calculateGroupScores(groupData.members, matchesData, predsData, activeRules);
+        const calculatedScores = calculateGroupScores(groupId, groupData.members, matchesData, predsData, activeRules);
         setGroupScores(calculatedScores);
 
         // Sort members dynamically
@@ -239,7 +237,7 @@ export default function GroupDetailPage() {
       setGroup(updatedGroup);
 
       // Recalculate dynamic leaderboard scores in real time
-      const calculatedScores = calculateGroupScores(group.members, matches, allPredictions, updatedRules);
+      const calculatedScores = calculateGroupScores(group.id, group.members, matches, allPredictions, updatedRules);
       setGroupScores(calculatedScores);
 
       // Resort members
@@ -469,7 +467,7 @@ export default function GroupDetailPage() {
 
         {/* Group Predictions Social View */}
         <section className="space-y-6">
-          <h2 className="text-2xl font-bold text-gray-200">Pronósticos del Grupo (Burlas Sociales)</h2>
+          <h2 className="text-2xl font-bold text-gray-200">Pronósticos del Grupo</h2>
           <p className="text-xs text-gray-400 -mt-4">Los pronósticos de tus rivales están ocultos hasta que el partido se cierre (hora de inicio) para garantizar el juego limpio.</p>
           
           <div className="grid gap-6">

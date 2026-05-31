@@ -10,9 +10,6 @@ export interface User {
   age?: number;
   city?: string;
   neighborhood?: string;
-  totalPoints?: number;
-  exactGuesses?: number;
-  champion?: string;
   // How this account was admitted (invite-only gate). Set once at sign-up for
   // every account — points at the /invites code that admitted them. For a group
   // invite this is also the pending group the dashboard offers to join.
@@ -85,11 +82,25 @@ export interface Match {
 export interface Prediction {
   id: string;
   userId: string;
+  // Predictions are scoped per group: a user makes a separate prediction for the
+  // same match in each group they belong to, so points stay independent across
+  // groups. Doc id is `${userId}_${groupId}_${matchId}`.
+  groupId: string;
   matchId: string;
   predictedHomeScore: number;
   predictedAwayScore: number;
   pointsEarned: number | null;
   timestamp: Date; // In Firestore this will be a Timestamp, but converted to Date in client
+}
+
+// A user's champion pick, scoped per group (parallels Prediction). Doc id is
+// `${userId}_${groupId}`. Display-only for now — not used in scoring.
+export interface Champion {
+  id: string;
+  userId: string;
+  groupId: string;
+  champion: string;
+  timestamp: Date; // In Firestore this will be a Timestamp, but converted to Date on the client
 }
 
 export interface Notification {

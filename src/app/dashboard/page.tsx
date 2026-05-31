@@ -17,7 +17,7 @@ import {
   onSnapshot,
   writeBatch
 } from "firebase/firestore";
-import { Match, Prediction, User, Group, Invite } from "@/types";
+import { Match, Prediction, User, Group, Invite, Champion } from "@/types";
 import { calculateGroupScores } from "@/lib/scoring";
 import { getFlag } from "@/lib/flags";
 import { isChampionLocked, getMaxMembersPerGroup, DEFAULT_MAX_MEMBERS_PER_GROUP } from "@/lib/config";
@@ -55,11 +55,16 @@ export default function UnifiedDashboard() {
   const [groupMembers, setGroupMembers] = useState<User[]>([]);
   
   const [matches, setMatches] = useState<Match[]>([]);
-  const [predictions, setPredictions] = useState<Record<string, Prediction>>({});
-  
+  // Predictions are per-group: keyed [groupId][matchId]. A user predicts each
+  // match separately in every group, so points stay independent across groups.
+  const [predictionsByGroup, setPredictionsByGroup] = useState<Record<string, Record<string, Prediction>>>({});
+
   // Form/Local States
   const [loading, setLoading] = useState(true);
   const [savingPrediction, setSavingPrediction] = useState<Record<string, boolean>>({});
+  // This user's saved champion per group (groupId -> team). `selectedChampion`
+  // and `championSaved` track the picker for the currently selected group.
+  const [championsByGroup, setChampionsByGroup] = useState<Record<string, string>>({});
   const [selectedChampion, setSelectedChampion] = useState("");
   const [championSaved, setChampionSaved] = useState(false);
   const [predictionFilter, setPredictionFilter] = useState<"all" | "group" | "round_of_16" | "quarter_finals" | "semi_finals" | "finals">("all");
@@ -89,6 +94,9 @@ export default function UnifiedDashboard() {
   const [inviteCode, setInviteCode] = useState("");
   const [joinLoading, setJoinLoading] = useState(false);
   const [groupScores, setGroupScores] = useState<Record<string, { totalPoints: number; exactGuesses: number }>>({});
+  // Champion pick per member for the currently selected group (uid -> team),
+  // used by the leaderboard. Loaded alongside the group's leaderboard.
+  const [memberChampions, setMemberChampions] = useState<Record<string, string>>({});
   const [notifications, setNotifications] = useState<any[]>([]);
   const [showNotifDrawer, setShowNotifDrawer] = useState(false);
 
@@ -200,10 +208,6 @@ export default function UnifiedDashboard() {
       if (userDoc.exists()) {
         userData = userDoc.data();
         setDbUser(userData);
-        if (userData.champion) {
-          setSelectedChampion(userData.champion);
-          setChampionSaved(true);
-        }
       }
 
       // 2. Fetch User's Groups
@@ -255,22 +259,38 @@ export default function UnifiedDashboard() {
       });
       setMatches(matchesData);
 
+      // 4. Fetch all of this user's predictions across their groups, keyed
+      // [groupId][matchId]. Used to scope the predictions tab to the selected
+      // group, and to prefill from another group when entering a new one.
+      const predsQuery = query(collection(db, "predictions"), where("userId", "==", uid));
+      const predsSnapshot = await getDocs(predsQuery);
+      const byGroup: Record<string, Record<string, Prediction>> = {};
+      predsSnapshot.forEach((doc) => {
+        const data = { id: doc.id, ...doc.data() } as Prediction;
+        if (!data.groupId) return; // ignore any legacy global predictions
+        (byGroup[data.groupId] ??= {})[data.matchId] = data;
+      });
+      setPredictionsByGroup(byGroup);
+
+      // 5. Fetch this user's champion picks across their groups (groupId -> team).
+      const champsQuery = query(collection(db, "champions"), where("userId", "==", uid));
+      const champsSnapshot = await getDocs(champsQuery);
+      const champByGroup: Record<string, string> = {};
+      champsSnapshot.forEach((doc) => {
+        const c = doc.data() as Champion;
+        if (c.groupId && c.champion) champByGroup[c.groupId] = c.champion;
+      });
+      setChampionsByGroup(champByGroup);
+
       if (groupsData.length > 0) {
         // Default to first group. Pass the freshly-fetched matches explicitly,
         // since the `matches` state set above is not yet visible in this closure.
-        setSelectedGroup(groupsData[0]);
-        await loadGroupLeaderboard(groupsData[0], matchesData);
+        const first = groupsData[0];
+        setSelectedGroup(first);
+        setSelectedChampion(champByGroup[first.id] || "");
+        setChampionSaved(!!champByGroup[first.id]);
+        await loadGroupLeaderboard(first, matchesData);
       }
-
-      // 4. Fetch User's Predictions
-      const predsQuery = query(collection(db, "predictions"), where("userId", "==", uid));
-      const predsSnapshot = await getDocs(predsQuery);
-      const predsData: Record<string, Prediction> = {};
-      predsSnapshot.forEach((doc) => {
-        const data = doc.data() as Prediction;
-        predsData[data.matchId] = data;
-      });
-      setPredictions(predsData);
 
     } catch (err) {
       console.error("Error loading dashboard data:", err);
@@ -293,16 +313,24 @@ export default function UnifiedDashboard() {
         });
       }
 
-      // Fetch Predictions made by any of the group members
+      // Fetch this group's predictions in one query (predictions are scoped by
+      // groupId now, so no need to chunk by member).
       const predsData: Prediction[] = [];
-      for (let i = 0; i < group.members.length; i += 10) {
-        const chunk = group.members.slice(i, i + 10);
-        const pQuery = query(collection(db, "predictions"), where("userId", "in", chunk));
-        const pSnapshot = await getDocs(pQuery);
-        pSnapshot.forEach((doc) => {
-          predsData.push({ id: doc.id, ...doc.data() } as Prediction);
-        });
-      }
+      const pQuery = query(collection(db, "predictions"), where("groupId", "==", group.id));
+      const pSnapshot = await getDocs(pQuery);
+      pSnapshot.forEach((doc) => {
+        predsData.push({ id: doc.id, ...doc.data() } as Prediction);
+      });
+
+      // Fetch this group's champion picks (uid -> team) for display.
+      const champMap: Record<string, string> = {};
+      const cQuery = query(collection(db, "champions"), where("groupId", "==", group.id));
+      const cSnapshot = await getDocs(cQuery);
+      cSnapshot.forEach((doc) => {
+        const c = doc.data() as Champion;
+        if (c.userId && c.champion) champMap[c.userId] = c.champion;
+      });
+      setMemberChampions(champMap);
 
       // Default Group scoring rules
       const defaultRules = {
@@ -317,7 +345,7 @@ export default function UnifiedDashboard() {
       // Use freshly-fetched matches when provided (during initial load the `matches`
       // state is still empty here), otherwise fall back to the current state.
       const matchesForScoring = matchesList ?? matches;
-      const calculatedScores = calculateGroupScores(group.members, matchesForScoring, predsData, activeRules);
+      const calculatedScores = calculateGroupScores(group.id, group.members, matchesForScoring, predsData, activeRules);
       setGroupScores(calculatedScores);
 
       // Sort by dynamic group-specific totalPoints desc, then exactGuesses desc
@@ -337,22 +365,36 @@ export default function UnifiedDashboard() {
     const selected = groups.find(g => g.id === groupId);
     if (selected) {
       setSelectedGroup(selected);
+      // Champion is per-group: reflect the pick saved for this group.
+      setSelectedChampion(championsByGroup[selected.id] || "");
+      setChampionSaved(!!championsByGroup[selected.id]);
       await loadGroupLeaderboard(selected);
     }
   };
 
   const handleSaveChampion = async () => {
     if (!selectedChampion || !user) return;
+    if (!selectedGroup) {
+      alert("Debes seleccionar un grupo para elegir tu campeón.");
+      return;
+    }
     if (isChampionLocked()) {
       alert("El plazo para elegir o cambiar de campeón ya finalizó.");
       return;
     }
     try {
-      await updateDoc(doc(db, "users", user.uid), {
-        champion: selectedChampion
+      // Champion is per-group: one pick per (user, group).
+      const champId = `${user.uid}_${selectedGroup.id}`;
+      await setDoc(doc(db, "champions", champId), {
+        id: champId,
+        userId: user.uid,
+        groupId: selectedGroup.id,
+        champion: selectedChampion,
+        timestamp: new Date(),
       });
       setChampionSaved(true);
-      setDbUser((prev: any) => ({ ...prev, champion: selectedChampion }));
+      setChampionsByGroup(prev => ({ ...prev, [selectedGroup.id]: selectedChampion }));
+      setMemberChampions(prev => ({ ...prev, [user.uid]: selectedChampion }));
       alert("¡Campeón guardado con éxito!");
     } catch (err) {
       console.error(err);
@@ -365,24 +407,58 @@ export default function UnifiedDashboard() {
     setPredictionPage(1);
   }, [predictionFilter]);
 
+  // The prediction to show for a match in the currently selected group: the one
+  // saved for this group if it exists, otherwise an editable prefill copied from
+  // another group the user belongs to (not yet saved here — no id, no points).
+  // Returns undefined when the user has no prediction for this match anywhere.
+  const getDisplayPrediction = (matchId: string): Prediction | undefined => {
+    const gid = selectedGroup?.id;
+    if (!gid) return undefined;
+    const own = predictionsByGroup[gid]?.[matchId];
+    if (own) return own;
+    for (const [g, byMatch] of Object.entries(predictionsByGroup)) {
+      if (g !== gid && byMatch[matchId]) {
+        const src = byMatch[matchId];
+        // Prefill: copy the scores, but scope to this group and clear identity/points.
+        // Empty id marks it as not-yet-saved here; submitPrediction assigns the real id.
+        return {
+          ...src,
+          id: "",
+          groupId: gid,
+          userId: user.uid,
+          pointsEarned: null,
+        };
+      }
+    }
+    return undefined;
+  };
+
   const handlePredictionChange = (matchId: string, team: "home" | "away", scoreStr: string) => {
+    const gid = selectedGroup?.id;
+    if (!gid) return;
     // Keep only digits and allow an empty value so the field can be cleared.
     const sanitized = scoreStr.replace(/\D/g, "").slice(0, 2);
 
-    setPredictions((prev) => {
-      const existing = prev[matchId] || {
+    setPredictionsByGroup((prev) => {
+      const groupPreds = prev[gid] || {};
+      const existing = groupPreds[matchId] || getDisplayPrediction(matchId) || ({
         matchId,
         userId: user.uid,
+        groupId: gid,
         predictedHomeScore: "",
         predictedAwayScore: "",
         pointsEarned: null,
-      };
+      } as unknown as Prediction);
 
       return {
         ...prev,
-        [matchId]: {
-          ...existing,
-          [team === "home" ? "predictedHomeScore" : "predictedAwayScore"]: sanitized,
+        [gid]: {
+          ...groupPreds,
+          [matchId]: {
+            ...existing,
+            groupId: gid,
+            [team === "home" ? "predictedHomeScore" : "predictedAwayScore"]: sanitized,
+          } as Prediction,
         },
       };
     });
@@ -394,8 +470,13 @@ export default function UnifiedDashboard() {
       alert("Para ingresar pronósticos debes unirte a un grupo primero.");
       return;
     }
+    if (!selectedGroup) {
+      alert("Selecciona un grupo para guardar tu pronóstico.");
+      return;
+    }
+    const gid = selectedGroup.id;
 
-    const prediction = predictions[matchId];
+    const prediction = predictionsByGroup[gid]?.[matchId] || getDisplayPrediction(matchId);
     if (!prediction) return;
 
     // Both scores must be filled in before saving.
@@ -419,17 +500,25 @@ export default function UnifiedDashboard() {
 
     setSavingPrediction(prev => ({ ...prev, [matchId]: true }));
     try {
-      const predId = prediction.id || `${user.uid}_${matchId}`;
+      // One prediction per (user, group, match).
+      const predId = `${user.uid}_${gid}_${matchId}`;
       const payload: Prediction = {
         ...prediction,
+        id: predId,
+        userId: user.uid,
+        groupId: gid,
+        matchId,
         predictedHomeScore: home,
         predictedAwayScore: away,
-        id: predId,
+        pointsEarned: prediction.pointsEarned ?? null,
         timestamp: new Date(),
       };
-      
+
       await setDoc(doc(db, "predictions", predId), payload);
-      setPredictions(prev => ({ ...prev, [matchId]: payload }));
+      setPredictionsByGroup(prev => ({
+        ...prev,
+        [gid]: { ...(prev[gid] || {}), [matchId]: payload },
+      }));
     } catch (err) {
       console.error("Error saving prediction:", err);
       alert("Error al guardar el pronóstico.");
@@ -645,12 +734,15 @@ export default function UnifiedDashboard() {
     }
   }
 
-  // Real-time missing prediction calculations inside the next 24 hours
+  // Real-time missing prediction calculations inside the next 24 hours, for the
+  // currently selected group (predictions are per-group, so "missing" means not
+  // yet saved in this group).
+  const currentGroupPreds = selectedGroup ? (predictionsByGroup[selectedGroup.id] || {}) : {};
   const missingPredictions24h = matches.filter(m => {
     if (m.status !== "upcoming") return false;
     const kickoffMs = m.kickoffTime instanceof Date ? m.kickoffTime.getTime() : (m.kickoffTime as any).toMillis();
     const diffHours = (kickoffMs - Date.now()) / (1000 * 60 * 60);
-    const hasPred = predictions[m.id] !== undefined;
+    const hasPred = currentGroupPreds[m.id] !== undefined;
     return diffHours > 0 && diffHours <= 24 && !hasPred;
   });
 
@@ -724,8 +816,14 @@ export default function UnifiedDashboard() {
               {/* Champion Card */}
               <div className="p-6 bg-gradient-to-br from-emerald-600 to-indigo-900 rounded-2xl border border-white/10 shadow-lg space-y-4">
                 <div>
-                  <span className="text-[10px] tracking-wider font-extrabold uppercase text-emerald-300">TU CAMPEÓN</span>
-                  {championSaved ? (
+                  <span className="text-[10px] tracking-wider font-extrabold uppercase text-emerald-300">
+                    TU CAMPEÓN{selectedGroup ? ` · ${selectedGroup.name}` : ""}
+                  </span>
+                  {!selectedGroup ? (
+                    <p className="mt-2 text-xs text-white/80 font-medium">
+                      Únete a un grupo para elegir tu campeón.
+                    </p>
+                  ) : championSaved ? (
                     <div className="mt-1 flex items-center justify-between">
                       <h2 className="text-3xl font-black text-white tracking-tight">{selectedChampion}</h2>
                       <span className="px-2.5 py-1 bg-emerald-500/20 border border-emerald-500/30 text-emerald-300 text-[10px] font-bold rounded-full uppercase">
@@ -962,7 +1060,7 @@ export default function UnifiedDashboard() {
                   .map(match => {
                     const kickoffMs = match.kickoffTime instanceof Date ? match.kickoffTime.getTime() : (match.kickoffTime as any).toMillis();
                     const isLocked = Date.now() >= kickoffMs || match.status === "locked" || match.status === "finished";
-                    const pred = predictions[match.id] || { predictedHomeScore: "", predictedAwayScore: "" };
+                    const pred: Prediction = getDisplayPrediction(match.id) || ({ predictedHomeScore: "", predictedAwayScore: "" } as unknown as Prediction);
 
                     return (
                       <div key={match.id} className="p-4 bg-white/5 border border-white/10 rounded-2xl relative overflow-hidden">
@@ -1209,7 +1307,7 @@ export default function UnifiedDashboard() {
                                   {member.displayName} {isSelf && "(Tú)"}
                                 </h4>
                                 <span className="text-[10px] text-gray-500 font-medium">
-                                  Campeón: <span className="text-gray-300 font-semibold">{member.champion || "Pendiente"}</span>
+                                  Campeón: <span className="text-gray-300 font-semibold">{memberChampions[member.uid] || "Pendiente"}</span>
                                 </span>
                               </div>
                             </div>

@@ -40,15 +40,23 @@ export function getOutcome(home: number, away: number): 'home_win' | 'away_win' 
 /**
  * Dynamically calculates total points and exact guesses for all group members.
  * Supports custom scoring rules, unique prediction bonuses, and phase bonuses.
+ *
+ * Predictions are per-group: only predictions whose `groupId` matches this group
+ * are counted, so a member's predictions in their *other* groups never leak into
+ * this leaderboard. Callers may pass an unfiltered prediction list safely.
  */
 export function calculateGroupScores(
+  groupId: string,
   members: string[],
   matches: Match[],
   predictions: Prediction[],
   rules: GroupRules
 ): Record<string, { totalPoints: number; exactGuesses: number }> {
   const scores: Record<string, { totalPoints: number; exactGuesses: number }> = {};
-  
+
+  // Only this group's predictions count toward this group's standings.
+  const groupPredictions = predictions.filter(p => p.groupId === groupId);
+
   // Initialize
   members.forEach(uid => {
     scores[uid] = { totalPoints: 0, exactGuesses: 0 };
@@ -63,7 +71,7 @@ export function calculateGroupScores(
     const actualOutcome = getOutcome(actualHome, actualAway);
 
     // Get predictions for this match by group members
-    const matchPreds = predictions.filter(p => p.matchId === match.id && members.includes(p.userId));
+    const matchPreds = groupPredictions.filter(p => p.matchId === match.id && members.includes(p.userId));
 
     // Keep track of who got exact score
     const exactScoreUsers: string[] = [];
@@ -99,7 +107,7 @@ export function calculateGroupScores(
   const semiFinalsMatches = finishedMatches.filter(m => m.phase === 'semi_finals');
 
   members.forEach(uid => {
-    const userPreds = predictions.filter(p => p.userId === uid);
+    const userPreds = groupPredictions.filter(p => p.userId === uid);
 
     // Bono Cuartos: Guess all Round of 16 winners correctly
     if (rules.quarterFinalsBonus > 0 && roundOf16Matches.length === 8) {

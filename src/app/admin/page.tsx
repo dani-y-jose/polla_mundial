@@ -497,55 +497,25 @@ export default function AdminPage() {
         resolutionMethod
       });
 
-      // 2. Calculate points for all predictions for this match
+      // 2. Cache the fixed 3/1/0 points on each prediction for this match (used
+      // for the per-match badge in the predictions tab). The leaderboard itself
+      // recomputes per-group with each group's own rules, so these per-doc values
+      // are not authoritative for standings.
       const q = query(collection(db, "predictions"), where("matchId", "==", matchId));
       const predsSnapshot = await getDocs(q);
-      
-      const userIds = new Set<string>();
+
       const batch = writeBatch(db);
       predsSnapshot.forEach((predDoc) => {
         const predData = predDoc.data() as Prediction;
-        userIds.add(predData.userId);
         const points = calculatePoints(predData.predictedHomeScore, predData.predictedAwayScore, hScore, aScore);
-        
+
         const pRef = doc(db, "predictions", predDoc.id);
         batch.update(pRef, { pointsEarned: points });
       });
 
       await batch.commit();
 
-      // 3. Recalculate global totalPoints and exactGuesses for each affected user
-      for (const userId of userIds) {
-        const userPredsQuery = query(collection(db, "predictions"), where("userId", "==", userId));
-        const userPredsSnapshot = await getDocs(userPredsQuery);
-        
-        let totalPoints = 0;
-        let exactGuesses = 0;
-        
-        userPredsSnapshot.forEach((doc) => {
-          const pred = doc.data() as Prediction;
-          let points = pred.pointsEarned;
-          
-          // Override with current score calculation to avoid write-propagation latency
-          if (pred.matchId === matchId) {
-            points = calculatePoints(pred.predictedHomeScore, pred.predictedAwayScore, hScore, aScore);
-          }
-          
-          if (points !== null) {
-            totalPoints += points;
-            if (points === 3) {
-              exactGuesses += 1;
-            }
-          }
-        });
-        
-        await updateDoc(doc(db, "users", userId), {
-          totalPoints,
-          exactGuesses
-        });
-      }
-
-      // 4. Send automatic score update notification to ALL registered users
+      // 3. Send automatic score update notification to ALL registered users
       try {
         const currentMatch = matches.find(m => m.id === matchId);
         const homeTeamName = currentMatch?.homeTeam || "Equipo Local";
