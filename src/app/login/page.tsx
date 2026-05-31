@@ -1,15 +1,25 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { 
-  createUserWithEmailAndPassword, 
-  signInWithEmailAndPassword, 
-  signInWithPopup, 
-  GoogleAuthProvider 
+import {
+  createUserWithEmailAndPassword,
+  signInWithEmailAndPassword,
+  signInWithPopup,
+  GoogleAuthProvider,
+  signOut,
+  type User as FirebaseUser,
 } from "firebase/auth";
 import { auth, db } from "@/lib/firebase";
-import { doc, setDoc, getDoc } from "firebase/firestore";
+import { doc, getDoc, runTransaction, arrayUnion } from "firebase/firestore";
+
+// What kind of invite (if any) admitted the visitor to the sign-up form.
+type InviteState =
+  | { status: "none" }
+  | { status: "checking" }
+  | { status: "invalid"; reason: string }
+  | { status: "valid"; kind: "app"; code: string; remaining: number }
+  | { status: "valid"; kind: "group"; code: string; groupId: string; groupName: string };
 
 export default function LoginPage() {
   const [isSignUp, setIsSignUp] = useState(false);
@@ -21,32 +31,143 @@ export default function LoginPage() {
   const [neighborhood, setNeighborhood] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
-  
+  const [invite, setInvite] = useState<InviteState>({ status: "none" });
+
   const router = useRouter();
+
+  // Resolve the invite from the URL (?invite=APPCODE or ?gcode=GROUPCODE) so we
+  // know whether to show the sign-up form and how to admit the new account.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const appCode = params.get("invite")?.trim();
+    const groupCode = params.get("gcode")?.trim().toUpperCase();
+
+    if (!appCode && !groupCode) {
+      setInvite({ status: "none" });
+      return;
+    }
+
+    setInvite({ status: "checking" });
+    setIsSignUp(true);
+
+    (async () => {
+      try {
+        if (appCode) {
+          const snap = await getDoc(doc(db, "invites", appCode));
+          if (!snap.exists()) {
+            setInvite({ status: "invalid", reason: "Esta invitación no existe." });
+            return;
+          }
+          const inv = snap.data();
+          const expMs = inv.expiresAt?.toMillis?.() ?? null;
+          if (inv.active === false) {
+            setInvite({ status: "invalid", reason: "Esta invitación fue desactivada." });
+          } else if (expMs !== null && expMs < Date.now()) {
+            setInvite({ status: "invalid", reason: "Esta invitación expiró." });
+          } else if ((inv.uses ?? 0) >= (inv.maxUses ?? 0)) {
+            setInvite({ status: "invalid", reason: "Esta invitación alcanzó su límite de usos." });
+          } else {
+            setInvite({
+              status: "valid",
+              kind: "app",
+              code: appCode,
+              remaining: (inv.maxUses ?? 0) - (inv.uses ?? 0),
+            });
+          }
+          return;
+        }
+
+        // Group code: resolve it to a group via the public lookup table.
+        const codeSnap = await getDoc(doc(db, "inviteCodes", groupCode!));
+        if (!codeSnap.exists()) {
+          setInvite({ status: "invalid", reason: "El código de grupo no es válido." });
+          return;
+        }
+        const { groupId } = codeSnap.data() as { groupId: string };
+        let groupName = "tu grupo";
+        try {
+          const gSnap = await getDoc(doc(db, "groups", groupId));
+          if (gSnap.exists()) groupName = (gSnap.data().name as string) || groupName;
+        } catch {
+          // Group is member-only readable; the name is just nice-to-have.
+        }
+        setInvite({ status: "valid", kind: "group", code: groupCode!, groupId, groupName });
+      } catch (err) {
+        console.error(err);
+        setInvite({ status: "invalid", reason: "No se pudo validar la invitación." });
+      }
+    })();
+  }, []);
+
+  // Create the profile and consume the invite in one atomic transaction. The
+  // Firestore rules only allow the profile to be written when the invite is
+  // consumed in the same commit, so this is the real enforcement point.
+  const provisionProfile = async (fbUser: FirebaseUser) => {
+    if (invite.status !== "valid") {
+      throw new Error("Necesitas una invitación válida para registrarte.");
+    }
+    const baseProfile = {
+      uid: fbUser.uid,
+      email: fbUser.email,
+      displayName: name || fbUser.displayName || fbUser.email?.split("@")[0] || "Usuario",
+      isAdmin: false,
+      age: age ? parseInt(age, 10) : undefined,
+      city: city || undefined,
+      neighborhood: neighborhood || undefined,
+      totalPoints: 0,
+      exactGuesses: 0,
+    };
+
+    await runTransaction(db, async (tx) => {
+      if (invite.kind === "app") {
+        const invRef = doc(db, "invites", invite.code);
+        const invSnap = await tx.get(invRef);
+        if (!invSnap.exists()) throw new Error("La invitación ya no existe.");
+        const inv = invSnap.data();
+        const expMs = inv.expiresAt?.toMillis?.() ?? null;
+        if (inv.active === false) throw new Error("Esta invitación fue desactivada.");
+        if (expMs !== null && expMs < Date.now()) throw new Error("Esta invitación expiró.");
+        if ((inv.uses ?? 0) >= (inv.maxUses ?? 0)) throw new Error("Esta invitación alcanzó su límite de usos.");
+        const consumedBy: string[] = inv.consumedBy ?? [];
+        if (consumedBy.includes(fbUser.uid)) throw new Error("Ya usaste esta invitación.");
+
+        tx.set(doc(db, "users", fbUser.uid), { ...baseProfile, inviteId: invite.code });
+        tx.update(invRef, {
+          uses: (inv.uses ?? 0) + 1,
+          consumedBy: [...consumedBy, fbUser.uid],
+        });
+      } else {
+        // Group invite: create the profile and join the group together. We
+        // can't read the group yet (read is member-only), so add ourselves
+        // blindly with arrayUnion — the rules permit a user adding only their
+        // own uid to members, exactly like the existing join flow.
+        tx.set(doc(db, "users", fbUser.uid), { ...baseProfile, inviteCodeUsed: invite.code });
+        tx.update(doc(db, "groups", invite.groupId), { members: arrayUnion(fbUser.uid) });
+      }
+    });
+  };
 
   const handleAuth = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     setError("");
-    
+
     try {
       if (isSignUp) {
+        if (invite.status !== "valid") {
+          setError("Necesitas una invitación válida para registrarte.");
+          setLoading(false);
+          return;
+        }
         const userCredential = await createUserWithEmailAndPassword(auth, email, password);
-        const user = userCredential.user;
-        
-        // Save user profile to Firestore
-        await setDoc(doc(db, "users", user.uid), {
-          uid: user.uid,
-          email: user.email,
-          displayName: name || email.split("@")[0],
-          isAdmin: false,
-          age: age ? parseInt(age, 10) : undefined,
-          city: city || undefined,
-          neighborhood: neighborhood || undefined,
-          totalPoints: 0,
-          exactGuesses: 0,
-        });
-        
+        try {
+          await provisionProfile(userCredential.user);
+        } catch (provisionErr) {
+          // The auth account exists but we couldn't admit them — roll back by
+          // deleting the half-created account so they can retry cleanly.
+          await userCredential.user.delete().catch(() => {});
+          throw provisionErr;
+        }
         router.push("/dashboard");
       } else {
         await signInWithEmailAndPassword(auth, email, password);
@@ -62,27 +183,24 @@ export default function LoginPage() {
   const handleGoogleSignIn = async () => {
     setLoading(true);
     setError("");
-    
+
     try {
       const provider = new GoogleAuthProvider();
       const result = await signInWithPopup(auth, provider);
       const user = result.user;
-      
-      // Save profile to Firestore only if user doesn't already have one
-      const userDocRef = doc(db, "users", user.uid);
-      const userDoc = await getDoc(userDocRef);
-      
+
+      // Existing users may always sign in. New users need a valid invite.
+      const userDoc = await getDoc(doc(db, "users", user.uid));
       if (!userDoc.exists()) {
-        await setDoc(userDocRef, {
-          uid: user.uid,
-          email: user.email,
-          displayName: user.displayName || user.email?.split("@")[0] || "Usuario",
-          isAdmin: false,
-          totalPoints: 0,
-          exactGuesses: 0,
-        });
+        if (invite.status !== "valid") {
+          await signOut(auth);
+          setError("Necesitas una invitación válida para crear una cuenta.");
+          setLoading(false);
+          return;
+        }
+        await provisionProfile(user);
       }
-      
+
       router.push("/dashboard");
     } catch (err: any) {
       console.error(err);
@@ -91,6 +209,8 @@ export default function LoginPage() {
       setLoading(false);
     }
   };
+
+  const canSignUp = invite.status === "valid";
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-black text-white px-4 py-8">
@@ -105,8 +225,30 @@ export default function LoginPage() {
           </div>
         )}
 
+        {/* Invite-only gate feedback (only relevant while signing up). */}
+        {isSignUp && invite.status === "checking" && (
+          <div className="mb-4 p-3 bg-white/5 border border-white/10 text-gray-300 rounded-lg text-sm">
+            Validando invitación…
+          </div>
+        )}
+        {isSignUp && invite.status === "valid" && (
+          <div className="mb-4 p-3 bg-emerald-500/15 border border-emerald-500/40 text-emerald-200 rounded-lg text-sm">
+            {invite.kind === "group"
+              ? <>Invitación válida 🎉 Al registrarte te unirás a <span className="font-bold">{invite.groupName}</span>.</>
+              : <>Invitación válida 🎉 {invite.remaining} {invite.remaining === 1 ? "cupo disponible" : "cupos disponibles"}.</>}
+          </div>
+        )}
+        {isSignUp && (invite.status === "invalid" || invite.status === "none") && (
+          <div className="mb-4 p-3 bg-amber-500/15 border border-amber-500/40 text-amber-200 rounded-lg text-sm">
+            {invite.status === "invalid"
+              ? (invite as { reason: string }).reason
+              : "El registro es solo por invitación."}{" "}
+            Necesitas un enlace de invitación para crear una cuenta. Si ya tienes cuenta, inicia sesión.
+          </div>
+        )}
+
         <form onSubmit={handleAuth} className="space-y-4">
-          {isSignUp && (
+          {isSignUp && canSignUp && (
             <>
               <div>
                 <label className="block text-sm font-medium text-gray-300 mb-1">Nombre Completo</label>
@@ -185,8 +327,8 @@ export default function LoginPage() {
 
           <button
             type="submit"
-            disabled={loading}
-            className="w-full py-3 px-4 bg-emerald-600 hover:bg-emerald-500 text-white font-semibold rounded-lg transition-colors disabled:opacity-50 mt-6"
+            disabled={loading || (isSignUp && !canSignUp)}
+            className="w-full py-3 px-4 bg-emerald-600 hover:bg-emerald-500 text-white font-semibold rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed mt-6"
           >
             {loading ? "Por favor espera..." : isSignUp ? "Registrarse" : "Iniciar Sesión"}
           </button>
@@ -200,8 +342,8 @@ export default function LoginPage() {
 
         <button
           onClick={handleGoogleSignIn}
-          disabled={loading}
-          className="w-full py-3 px-4 bg-white text-black hover:bg-neutral-100 font-semibold rounded-lg flex items-center justify-center gap-3 transition-colors disabled:opacity-50 mb-4"
+          disabled={loading || (isSignUp && !canSignUp)}
+          className="w-full py-3 px-4 bg-white text-black hover:bg-neutral-100 font-semibold rounded-lg flex items-center justify-center gap-3 transition-colors disabled:opacity-50 disabled:cursor-not-allowed mb-4"
         >
           <svg className="w-5 h-5" viewBox="0 0 24 24">
             <path

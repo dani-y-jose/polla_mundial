@@ -1020,7 +1020,7 @@ export default function UnifiedDashboard() {
                   <div className="flex gap-2 pt-2 border-t border-white/5 mt-2">
                     <a 
                       href={`https://api.whatsapp.com/send?text=${encodeURIComponent(
-                        `¡Únete a mi grupo de apuestas en La Polla Mundial 2026! ⚽🏆\n\nGrupo: *${selectedGroup.name}*\nCódigo de Invitación: *${selectedGroup.inviteCode}*\nInscripción: *${selectedGroup.entryFee ? `$${selectedGroup.entryFee.toLocaleString()}` : "Gratis"}*\n\nRegístrate e ingresa tus pronósticos aquí: ${typeof window !== 'undefined' ? window.location.origin : ''}/login`
+                        `¡Únete a mi grupo de apuestas en La Polla Mundial 2026! ⚽🏆\n\nGrupo: *${selectedGroup.name}*\nCódigo de Invitación: *${selectedGroup.inviteCode}*\nInscripción: *${selectedGroup.entryFee ? `$${selectedGroup.entryFee.toLocaleString()}` : "Gratis"}*\n\nRegístrate e ingresa tus pronósticos aquí: ${typeof window !== 'undefined' ? window.location.origin : ''}/login?gcode=${selectedGroup.inviteCode}`
                       )}`}
                       target="_blank"
                       rel="noopener noreferrer"
@@ -1325,7 +1325,7 @@ export default function UnifiedDashboard() {
                         </div>
                         <a
                           href={`https://api.whatsapp.com/send?text=${encodeURIComponent(
-                            `¡Únete a mi grupo de apuestas en La Polla Mundial 2026! ⚽🏆\n\nGrupo: *${g.name}*\nCódigo de Invitación: *${g.inviteCode}*\nInscripción: *${g.entryFee ? `$${g.entryFee.toLocaleString()}` : "Gratis"}*\n\nRegístrate e ingresa tus pronósticos aquí: ${typeof window !== 'undefined' ? window.location.origin : ''}/login`
+                            `¡Únete a mi grupo de apuestas en La Polla Mundial 2026! ⚽🏆\n\nGrupo: *${g.name}*\nCódigo de Invitación: *${g.inviteCode}*\nInscripción: *${g.entryFee ? `$${g.entryFee.toLocaleString()}` : "Gratis"}*\n\nRegístrate e ingresa tus pronósticos aquí: ${typeof window !== 'undefined' ? window.location.origin : ''}/login?gcode=${g.inviteCode}`
                           )}`}
                           target="_blank"
                           rel="noopener noreferrer"
@@ -1348,7 +1348,7 @@ export default function UnifiedDashboard() {
         </main>
 
         {/* Sticky Mobile Navigation Bar */}
-        <nav className="absolute bottom-0 left-0 right-0 h-16 bg-neutral-950/90 backdrop-blur-md border-t border-white/5 flex justify-around items-center z-50">
+        <nav className="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-md h-16 bg-neutral-950/90 backdrop-blur-md border-t border-white/5 flex justify-around items-center z-50">
           
           <button 
             onClick={() => setActiveTab("home")}
@@ -1422,7 +1422,7 @@ export default function UnifiedDashboard() {
               <div className="space-y-2 pt-2">
                 <a 
                   href={`https://api.whatsapp.com/send?text=${encodeURIComponent(
-                    `¡Únete a mi grupo de apuestas en La Polla Mundial 2026! ⚽🏆\n\nGrupo: *${createdGroup.name}*\nCódigo de Invitación: *${createdGroup.inviteCode}*\nInscripción: *${createdGroup.entryFee ? `$${createdGroup.entryFee.toLocaleString()}` : "Gratis"}*\n\nRegístrate e ingresa tus pronósticos aquí: ${typeof window !== 'undefined' ? window.location.origin : ''}/login`
+                    `¡Únete a mi grupo de apuestas en La Polla Mundial 2026! ⚽🏆\n\nGrupo: *${createdGroup.name}*\nCódigo de Invitación: *${createdGroup.inviteCode}*\nInscripción: *${createdGroup.entryFee ? `$${createdGroup.entryFee.toLocaleString()}` : "Gratis"}*\n\nRegístrate e ingresa tus pronósticos aquí: ${typeof window !== 'undefined' ? window.location.origin : ''}/login?gcode=${createdGroup.inviteCode}`
                   )}`}
                   target="_blank"
                   rel="noopener noreferrer"

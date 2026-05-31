@@ -30,15 +30,53 @@ service cloud.firestore {
       return request.resource.data.diff(resourceData).affectedKeys();
     }
 
+    // ---- Sign-up gate helpers ----
+    // A new profile may only be created by consuming a valid invite. There are
+    // two accepted paths:
+    //   1. An app-level invite in /invites (admin-minted, capped + expiring).
+    //   2. An existing group invite code in /inviteCodes (group membership is
+    //      its own natural cap; the user joins the group in the same write).
+
+    // The invite doc must be active, unexpired, under its cap, not already used
+    // by this user, AND be bumped by exactly one use + this uid in the SAME
+    // atomic write (getAfter ties the two writes together).
+    function consumeOk(code) {
+      let before = get(/databases/$(database)/documents/invites/$(code)).data;
+      let after = getAfter(/databases/$(database)/documents/invites/$(code)).data;
+      return before.active == true
+        && (before.expiresAt == null || before.expiresAt > request.time)
+        && before.uses < before.maxUses
+        && !(request.auth.uid in before.consumedBy)
+        && after.uses == before.uses + 1
+        && after.consumedBy == before.consumedBy.concat([request.auth.uid]);
+    }
+
+    function validAppInvite(code) {
+      return code != ''
+        && exists(/databases/$(database)/documents/invites/$(code))
+        && consumeOk(code);
+    }
+
+    function validGroupSignup(code) {
+      return code != ''
+        && exists(/databases/$(database)/documents/inviteCodes/$(code));
+    }
+
     // ---- Users ----
     match /users/{userId} {
       // Any signed-in user can read profiles (needed for leaderboards).
       allow read: if isSignedIn();
 
-      // On sign-up a user creates only their own doc and may never self-grant admin.
+      // On sign-up a user creates only their own doc, may never self-grant
+      // admin, and must consume a valid invite (app invite or group code) in
+      // the same atomic write — this is the invite-only gate.
       allow create: if isSignedIn()
         && request.auth.uid == userId
-        && request.resource.data.isAdmin == false;
+        && request.resource.data.isAdmin == false
+        && (
+          validAppInvite(request.resource.data.get('inviteId', ''))
+          || validGroupSignup(request.resource.data.get('inviteCodeUsed', ''))
+        );
 
       // Admins may update any profile (e.g. recomputed totalPoints/exactGuesses).
       // A user may update only their own whitelisted profile fields — never
@@ -128,6 +166,33 @@ service cloud.firestore {
 
       allow delete: if isSignedIn() && (
         resource.data.creatorId == request.auth.uid || isAdmin()
+      );
+    }
+
+    // ---- Invites (app-level sign-up gate) ----
+    // Admin-minted, capped, optionally-expiring links that let a new user
+    // create a profile. Doc id is the code.
+    match /invites/{code} {
+      // Links are capability URLs (unguessable); allow lookup so the sign-up
+      // page can validate the link before the user has authenticated.
+      allow read: if true;
+
+      // Only admins mint or revoke invites.
+      allow create, delete: if isAdmin();
+
+      // Admins may edit freely (toggle active, raise the cap, change expiry).
+      // A signing-up user may only "consume" the invite: bump uses by exactly
+      // one and append their own uid — and only while active, unexpired and
+      // under the cap.
+      allow update: if isAdmin() || (
+        isSignedIn()
+        && changed(resource.data).hasOnly(['uses', 'consumedBy'])
+        && resource.data.active == true
+        && (resource.data.expiresAt == null || resource.data.expiresAt > request.time)
+        && resource.data.uses < resource.data.maxUses
+        && !(request.auth.uid in resource.data.consumedBy)
+        && request.resource.data.uses == resource.data.uses + 1
+        && request.resource.data.consumedBy == resource.data.consumedBy.concat([request.auth.uid])
       );
     }
 

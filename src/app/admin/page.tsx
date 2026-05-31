@@ -4,8 +4,8 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { onAuthStateChanged } from "firebase/auth";
 import { auth, db } from "@/lib/firebase";
-import { collection, getDocs, doc, setDoc, getDoc, updateDoc, query, where, writeBatch } from "firebase/firestore";
-import { Match, MatchPhase, ResolutionMethod, User, Prediction } from "@/types";
+import { collection, getDocs, doc, setDoc, getDoc, updateDoc, deleteDoc, query, where, writeBatch, Timestamp } from "firebase/firestore";
+import { Match, MatchPhase, ResolutionMethod, User, Prediction, Invite } from "@/types";
 import { calculatePoints } from "@/lib/scoring";
 
 const PHASE_TRANSLATIONS: Record<string, string> = {
@@ -115,6 +115,13 @@ export default function AdminPage() {
   const [loading, setLoading] = useState(true);
   const [syncLoading, setSyncLoading] = useState(false);
   const [backfillLoading, setBackfillLoading] = useState(false);
+
+  // App invites (sign-up gate)
+  const [invites, setInvites] = useState<Invite[]>([]);
+  const [inviteMaxUses, setInviteMaxUses] = useState("10");
+  const [inviteExpiry, setInviteExpiry] = useState(""); // datetime-local, optional
+  const [inviteLoading, setInviteLoading] = useState(false);
+  const [origin, setOrigin] = useState("");
   
   // New Match Form State
   const [homeTeam, setHomeTeam] = useState("");
@@ -127,6 +134,10 @@ export default function AdminPage() {
   const [refereeCountry, setRefereeCountry] = useState("");
 
   const router = useRouter();
+
+  useEffect(() => {
+    if (typeof window !== "undefined") setOrigin(window.location.origin);
+  }, []);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
@@ -162,6 +173,8 @@ export default function AdminPage() {
           return timeB - timeA; // Descending
         });
         setMatches(matchesData);
+
+        await refreshInvites();
 
       } catch (err) {
         console.error("Error fetching data:", err);
@@ -269,6 +282,94 @@ export default function AdminPage() {
   // One-time migration: backfill the public inviteCodes/{CODE} -> { groupId }
   // lookup for groups that were created before the lookup collection existed.
   // Safe to run repeatedly (only writes missing codes).
+  const refreshInvites = async () => {
+    const snap = await getDocs(collection(db, "invites"));
+    const list: Invite[] = [];
+    snap.forEach((d) => list.push({ ...(d.data() as Invite), code: d.id }));
+    // App invites only; group invites live in /inviteCodes.
+    setInvites(
+      list
+        .filter((i) => i.type === "app")
+        .sort((a, b) => {
+          const ta = a.createdAt instanceof Date ? a.createdAt.getTime() : (a.createdAt as any)?.toMillis?.() ?? 0;
+          const tb = b.createdAt instanceof Date ? b.createdAt.getTime() : (b.createdAt as any)?.toMillis?.() ?? 0;
+          return tb - ta;
+        })
+    );
+  };
+
+  const handleCreateAppInvite = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!user) return;
+    const max = parseInt(inviteMaxUses, 10);
+    if (!max || max < 1) {
+      alert("El límite de usos debe ser al menos 1.");
+      return;
+    }
+    setInviteLoading(true);
+    try {
+      // Generate a unique, unguessable code (doc id == code).
+      const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+      const gen = () => Array.from({ length: 10 }, () => chars.charAt(Math.floor(Math.random() * chars.length))).join("");
+      let code = gen();
+      for (let attempt = 0; attempt < 5; attempt++) {
+        const existing = await getDoc(doc(db, "invites", code));
+        if (!existing.exists()) break;
+        code = gen();
+      }
+
+      const newInvite = {
+        code,
+        type: "app" as const,
+        groupId: null,
+        maxUses: max,
+        uses: 0,
+        consumedBy: [] as string[],
+        expiresAt: inviteExpiry ? Timestamp.fromDate(new Date(inviteExpiry)) : null,
+        active: true,
+        createdBy: user.uid,
+        createdAt: new Date(),
+      };
+
+      await setDoc(doc(db, "invites", code), newInvite);
+      setInviteMaxUses("10");
+      setInviteExpiry("");
+      await refreshInvites();
+    } catch (err) {
+      console.error(err);
+      alert("Error al crear la invitación.");
+    } finally {
+      setInviteLoading(false);
+    }
+  };
+
+  const handleToggleInvite = async (invite: Invite) => {
+    try {
+      await updateDoc(doc(db, "invites", invite.code), { active: !invite.active });
+      await refreshInvites();
+    } catch (err) {
+      console.error(err);
+      alert("Error al actualizar la invitación.");
+    }
+  };
+
+  const handleDeleteInvite = async (invite: Invite) => {
+    if (!confirm("¿Eliminar esta invitación? El enlace dejará de funcionar.")) return;
+    try {
+      await deleteDoc(doc(db, "invites", invite.code));
+      await refreshInvites();
+    } catch (err) {
+      console.error(err);
+      alert("Error al eliminar la invitación.");
+    }
+  };
+
+  const copyInviteLink = (code: string) => {
+    const link = `${origin}/login?invite=${code}`;
+    navigator.clipboard.writeText(link);
+    alert("Enlace copiado:\n" + link);
+  };
+
   const handleBackfillInviteCodes = async () => {
     setBackfillLoading(true);
     try {
@@ -473,6 +574,83 @@ export default function AdminPage() {
           >
             {backfillLoading ? "Migrando..." : "Sincronizar Códigos 🔑"}
           </button>
+        </section>
+
+        {/* App Invites (sign-up gate) */}
+        <section className="bg-white/5 p-6 rounded-xl border border-white/10 space-y-6">
+          <div>
+            <h2 className="text-xl font-semibold text-amber-400">Invitaciones de Registro</h2>
+            <p className="text-xs text-gray-400 mt-1">
+              El registro es solo por invitación. Crea enlaces con un límite de usos (y opcionalmente una fecha de expiración) para controlar cuántas personas pueden crear una cuenta. Los enlaces de grupo también permiten registrarse y unirse al grupo.
+            </p>
+          </div>
+
+          <form onSubmit={handleCreateAppInvite} className="flex flex-col sm:flex-row gap-4 sm:items-end">
+            <div className="flex-1">
+              <label className="text-sm text-gray-400">Límite de usos</label>
+              <input
+                type="number"
+                min="1"
+                required
+                value={inviteMaxUses}
+                onChange={(e) => setInviteMaxUses(e.target.value)}
+                className="w-full mt-1 px-3 py-2 bg-black/50 border border-white/10 rounded"
+              />
+            </div>
+            <div className="flex-1">
+              <label className="text-sm text-gray-400">Expira (opcional)</label>
+              <input
+                type="datetime-local"
+                value={inviteExpiry}
+                onChange={(e) => setInviteExpiry(e.target.value)}
+                className="w-full mt-1 px-3 py-2 bg-black/50 border border-white/10 rounded"
+              />
+            </div>
+            <button
+              type="submit"
+              disabled={inviteLoading}
+              className="px-6 py-2 bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-black font-extrabold text-xs uppercase tracking-wider rounded transition-all"
+            >
+              {inviteLoading ? "Creando..." : "Crear Enlace 🎟️"}
+            </button>
+          </form>
+
+          {invites.length === 0 ? (
+            <p className="text-sm text-gray-500">Aún no hay invitaciones de registro.</p>
+          ) : (
+            <div className="space-y-3">
+              {invites.map((inv) => {
+                const expMs = inv.expiresAt
+                  ? (inv.expiresAt instanceof Date ? inv.expiresAt.getTime() : (inv.expiresAt as any)?.toMillis?.())
+                  : null;
+                const expired = expMs != null && expMs < Date.now();
+                const full = inv.uses >= inv.maxUses;
+                const usable = inv.active && !expired && !full;
+                return (
+                  <div key={inv.code} className="bg-black/40 p-4 rounded-lg border border-white/5 flex flex-col sm:flex-row sm:items-center gap-3">
+                    <div className="flex-1 min-w-0">
+                      <div className="font-mono text-sm text-amber-300 truncate">/login?invite={inv.code}</div>
+                      <div className="text-xs text-gray-400 mt-1">
+                        {inv.uses}/{inv.maxUses} usos
+                        {expMs != null && <> • expira {new Date(expMs).toLocaleString()}</>}
+                        {" • "}
+                        <span className={usable ? "text-emerald-400" : "text-red-400"}>
+                          {!inv.active ? "desactivada" : expired ? "expirada" : full ? "llena" : "activa"}
+                        </span>
+                      </div>
+                    </div>
+                    <div className="flex gap-2 shrink-0">
+                      <button onClick={() => copyInviteLink(inv.code)} className="px-3 py-1.5 bg-white/10 hover:bg-white/20 text-xs font-semibold rounded transition-all">Copiar</button>
+                      <button onClick={() => handleToggleInvite(inv)} className="px-3 py-1.5 bg-white/10 hover:bg-white/20 text-xs font-semibold rounded transition-all">
+                        {inv.active ? "Desactivar" : "Activar"}
+                      </button>
+                      <button onClick={() => handleDeleteInvite(inv)} className="px-3 py-1.5 bg-red-600/20 hover:bg-red-600/30 text-red-300 text-xs font-semibold rounded transition-all">Eliminar</button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </section>
 
         {/* Create Match Form */}

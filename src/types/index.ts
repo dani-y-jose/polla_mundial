@@ -13,6 +13,22 @@ export interface User {
   totalPoints?: number;
   exactGuesses?: number;
   champion?: string;
+  // How this account was admitted (invite-only gate). Set once at sign-up.
+  inviteId?: string;        // an /invites code (app-level invite)
+  inviteCodeUsed?: string;  // an /inviteCodes code (joined via a group link)
+}
+
+export interface Invite {
+  code: string;
+  type: 'app' | 'group';
+  groupId: string | null;
+  maxUses: number;
+  uses: number;
+  consumedBy: string[];
+  expiresAt: Date | null; // Timestamp in Firestore, converted to Date on client
+  active: boolean;
+  createdBy: string;
+  createdAt: Date;
 }
 
 export interface GroupRules {
