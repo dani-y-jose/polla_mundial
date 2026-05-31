@@ -213,8 +213,18 @@ export default function LoginPage() {
   const canSignUp = invite.status === "valid";
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-black text-white px-4 py-8">
-      <div className="max-w-md w-full p-8 bg-white/5 border border-white/10 rounded-2xl backdrop-blur-xl">
+    <div className="relative overflow-hidden min-h-screen flex items-center justify-center bg-black text-white px-4 py-8">
+      {/* Mascot backdrop — subtle, anchored at the bottom */}
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-x-0 bottom-0 z-0 h-[45%] bg-[url('/mascots.png')] bg-contain bg-bottom bg-no-repeat opacity-40"
+      />
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-0 z-0 bg-gradient-to-b from-black via-black/60 to-black/85"
+      />
+
+      <div className="relative z-10 max-w-md w-full p-8 bg-white/5 border border-white/10 rounded-2xl backdrop-blur-xl">
         <h2 className="text-3xl font-bold mb-6 text-center">
           {isSignUp ? "Crear una Cuenta" : "Iniciar Sesión"}
         </h2>
