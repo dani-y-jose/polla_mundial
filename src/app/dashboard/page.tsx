@@ -63,6 +63,7 @@ export default function UnifiedDashboard() {
   const [selectedChampion, setSelectedChampion] = useState("");
   const [championSaved, setChampionSaved] = useState(false);
   const [predictionFilter, setPredictionFilter] = useState<"all" | "group" | "round_of_16" | "quarter_finals" | "semi_finals" | "finals">("all");
+  const [predictionPage, setPredictionPage] = useState(1);
   const [searchQuery, setSearchQuery] = useState("");
   
   // Group Management States
@@ -316,16 +317,21 @@ export default function UnifiedDashboard() {
     }
   };
 
+  // Reset to the first page whenever the phase filter changes.
+  useEffect(() => {
+    setPredictionPage(1);
+  }, [predictionFilter]);
+
   const handlePredictionChange = (matchId: string, team: "home" | "away", scoreStr: string) => {
-    const score = parseInt(scoreStr, 10);
-    if (isNaN(score)) return;
+    // Keep only digits and allow an empty value so the field can be cleared.
+    const sanitized = scoreStr.replace(/\D/g, "").slice(0, 2);
 
     setPredictions((prev) => {
       const existing = prev[matchId] || {
         matchId,
         userId: user.uid,
-        predictedHomeScore: 0,
-        predictedAwayScore: 0,
+        predictedHomeScore: "",
+        predictedAwayScore: "",
         pointsEarned: null,
       };
 
@@ -333,7 +339,7 @@ export default function UnifiedDashboard() {
         ...prev,
         [matchId]: {
           ...existing,
-          [team === "home" ? "predictedHomeScore" : "predictedAwayScore"]: score,
+          [team === "home" ? "predictedHomeScore" : "predictedAwayScore"]: sanitized,
         },
       };
     });
@@ -349,6 +355,16 @@ export default function UnifiedDashboard() {
     const prediction = predictions[matchId];
     if (!prediction) return;
 
+    // Both scores must be filled in before saving.
+    const homeRaw = `${prediction.predictedHomeScore}`;
+    const awayRaw = `${prediction.predictedAwayScore}`;
+    if (homeRaw === "" || awayRaw === "") {
+      alert("Ingresa ambos marcadores antes de guardar.");
+      return;
+    }
+    const home = Number(homeRaw);
+    const away = Number(awayRaw);
+
     const match = matches.find((m) => m.id === matchId);
     if (!match) return;
 
@@ -363,6 +379,8 @@ export default function UnifiedDashboard() {
       const predId = prediction.id || `${user.uid}_${matchId}`;
       const payload: Prediction = {
         ...prediction,
+        predictedHomeScore: home,
+        predictedAwayScore: away,
         id: predId,
         timestamp: new Date(),
       };
@@ -538,6 +556,18 @@ export default function UnifiedDashboard() {
   });
 
   const unreadCount = notifications.filter(n => !n.read).length + missingPredictions24h.length;
+
+  // Paginate the predictions list so the bottom of the page stays reachable.
+  const PREDICTIONS_PER_PAGE = 10;
+  const filteredPredictionMatches = matches.filter(m =>
+    predictionFilter === "all" ? true : m.phase === predictionFilter
+  );
+  const totalPredictionPages = Math.max(1, Math.ceil(filteredPredictionMatches.length / PREDICTIONS_PER_PAGE));
+  const safePredictionPage = Math.min(predictionPage, totalPredictionPages);
+  const pagedPredictionMatches = filteredPredictionMatches.slice(
+    (safePredictionPage - 1) * PREDICTIONS_PER_PAGE,
+    safePredictionPage * PREDICTIONS_PER_PAGE
+  );
 
   return (
     <div className="min-h-screen bg-black flex justify-center text-white font-sans antialiased selection:bg-emerald-500/30">
@@ -796,11 +826,7 @@ export default function UnifiedDashboard() {
 
               {/* Match predictions list */}
               <div className="space-y-4">
-                {matches
-                  .filter(m => {
-                    if (predictionFilter === "all") return true;
-                    return m.phase === predictionFilter;
-                  })
+                {pagedPredictionMatches
                   .map(match => {
                     const kickoffMs = match.kickoffTime instanceof Date ? match.kickoffTime.getTime() : (match.kickoffTime as any).toMillis();
                     const isLocked = Date.now() >= kickoffMs || match.status === "locked" || match.status === "finished";
@@ -833,9 +859,11 @@ export default function UnifiedDashboard() {
                           {/* Score inputs */}
                           <div className="flex items-center gap-1.5 shrink-0">
                             <input
-                              type="number"
-                              min="0"
-                              value={pred.predictedHomeScore}
+                              type="text"
+                              inputMode="numeric"
+                              pattern="[0-9]*"
+                              maxLength={2}
+                              value={pred.predictedHomeScore ?? ""}
                               onChange={(e) => handlePredictionChange(match.id, "home", e.target.value)}
                               disabled={isLocked || groups.length === 0}
                               className="w-10 h-10 text-center bg-black/40 border border-white/15 rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-emerald-500 disabled:opacity-50"
@@ -843,9 +871,11 @@ export default function UnifiedDashboard() {
                             />
                             <span className="text-gray-500 text-xs font-bold">-</span>
                             <input
-                              type="number"
-                              min="0"
-                              value={pred.predictedAwayScore}
+                              type="text"
+                              inputMode="numeric"
+                              pattern="[0-9]*"
+                              maxLength={2}
+                              value={pred.predictedAwayScore ?? ""}
                               onChange={(e) => handlePredictionChange(match.id, "away", e.target.value)}
                               disabled={isLocked || groups.length === 0}
                               className="w-10 h-10 text-center bg-black/40 border border-white/15 rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-emerald-500 disabled:opacity-50"
@@ -883,7 +913,34 @@ export default function UnifiedDashboard() {
                       </div>
                     );
                   })}
+
+                {filteredPredictionMatches.length === 0 && (
+                  <p className="text-center text-xs text-gray-500 py-8">No hay partidos en esta categoría.</p>
+                )}
               </div>
+
+              {/* Pagination controls */}
+              {totalPredictionPages > 1 && (
+                <div className="flex items-center justify-center gap-3 pt-2">
+                  <button
+                    onClick={() => setPredictionPage(p => Math.max(1, p - 1))}
+                    disabled={safePredictionPage <= 1}
+                    className="px-3 py-1.5 text-[10px] font-bold rounded-full bg-white/5 text-gray-300 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed uppercase tracking-wider transition-all"
+                  >
+                    ← Anterior
+                  </button>
+                  <span className="text-[11px] text-gray-400 font-medium tabular-nums">
+                    {safePredictionPage} / {totalPredictionPages}
+                  </span>
+                  <button
+                    onClick={() => setPredictionPage(p => Math.min(totalPredictionPages, p + 1))}
+                    disabled={safePredictionPage >= totalPredictionPages}
+                    className="px-3 py-1.5 text-[10px] font-bold rounded-full bg-white/5 text-gray-300 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed uppercase tracking-wider transition-all"
+                  >
+                    Siguiente →
+                  </button>
+                </div>
+              )}
 
             </div>
           )}
