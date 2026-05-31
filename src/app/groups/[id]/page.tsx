@@ -39,16 +39,16 @@ export default function GroupDetailPage() {
   const [groupScores, setGroupScores] = useState<Record<string, { totalPoints: number; exactGuesses: number }>>({});
 
   // Group Settings Editor States
-  const [editEntryFee, setEditEntryFee] = useState(0);
-  const [editExactScorePoints, setEditExactScorePoints] = useState(3);
-  const [editCorrectOutcomePoints, setEditCorrectOutcomePoints] = useState(1);
-  const [editUniquePredictionPoints, setEditUniquePredictionPoints] = useState(0);
-  const [editQuarterFinalsBonus, setEditQuarterFinalsBonus] = useState(0);
-  const [editSemiFinalsBonus, setEditSemiFinalsBonus] = useState(0);
-  const [editFinalsBonus, setEditFinalsBonus] = useState(0);
-  const [editFirstPlacePercent, setEditFirstPlacePercent] = useState(50);
-  const [editSecondPlacePercent, setEditSecondPlacePercent] = useState(30);
-  const [editThirdPlacePercent, setEditThirdPlacePercent] = useState(20);
+  const [editEntryFee, setEditEntryFee] = useState("0");
+  const [editExactScorePoints, setEditExactScorePoints] = useState("3");
+  const [editCorrectOutcomePoints, setEditCorrectOutcomePoints] = useState("1");
+  const [editUniquePredictionPoints, setEditUniquePredictionPoints] = useState("0");
+  const [editQuarterFinalsBonus, setEditQuarterFinalsBonus] = useState("0");
+  const [editSemiFinalsBonus, setEditSemiFinalsBonus] = useState("0");
+  const [editFinalsBonus, setEditFinalsBonus] = useState("0");
+  const [editFirstPlacePercent, setEditFirstPlacePercent] = useState("50");
+  const [editSecondPlacePercent, setEditSecondPlacePercent] = useState("30");
+  const [editThirdPlacePercent, setEditThirdPlacePercent] = useState("20");
   const [editLoading, setEditLoading] = useState(false);
   const [editSuccess, setEditSuccess] = useState("");
   const [showSuccessModal, setShowSuccessModal] = useState(false);
@@ -104,16 +104,16 @@ export default function GroupDetailPage() {
         }
 
         // Initialize edit states
-        setEditEntryFee(groupData.entryFee || 0);
-        setEditExactScorePoints(groupData.rules?.exactScorePoints ?? 3);
-        setEditCorrectOutcomePoints(groupData.rules?.correctOutcomePoints ?? 1);
-        setEditUniquePredictionPoints(groupData.rules?.uniquePredictionPoints ?? 0);
-        setEditQuarterFinalsBonus(groupData.rules?.quarterFinalsBonus ?? 0);
-        setEditSemiFinalsBonus(groupData.rules?.semiFinalsBonus ?? 0);
-        setEditFinalsBonus(groupData.rules?.finalsBonus ?? 0);
-        setEditFirstPlacePercent(groupData.prizeDistribution?.firstPlacePercent ?? 50);
-        setEditSecondPlacePercent(groupData.prizeDistribution?.secondPlacePercent ?? 30);
-        setEditThirdPlacePercent(groupData.prizeDistribution?.thirdPlacePercent ?? 20);
+        setEditEntryFee(String(groupData.entryFee ?? 0));
+        setEditExactScorePoints(String(groupData.rules?.exactScorePoints ?? 3));
+        setEditCorrectOutcomePoints(String(groupData.rules?.correctOutcomePoints ?? 1));
+        setEditUniquePredictionPoints(String(groupData.rules?.uniquePredictionPoints ?? 0));
+        setEditQuarterFinalsBonus(String(groupData.rules?.quarterFinalsBonus ?? 0));
+        setEditSemiFinalsBonus(String(groupData.rules?.semiFinalsBonus ?? 0));
+        setEditFinalsBonus(String(groupData.rules?.finalsBonus ?? 0));
+        setEditFirstPlacePercent(String(groupData.prizeDistribution?.firstPlacePercent ?? 50));
+        setEditSecondPlacePercent(String(groupData.prizeDistribution?.secondPlacePercent ?? 30));
+        setEditThirdPlacePercent(String(groupData.prizeDistribution?.thirdPlacePercent ?? 20));
 
         // 2. Fetch Group Members' User profiles
         // Note: Firestore 'in' query allows up to 30 items
@@ -199,7 +199,7 @@ export default function GroupDetailPage() {
     setEditLoading(true);
     setEditSuccess("");
 
-    if (editFirstPlacePercent + editSecondPlacePercent + editThirdPlacePercent !== 100) {
+    if (Number(editFirstPlacePercent) + Number(editSecondPlacePercent) + Number(editThirdPlacePercent) !== 100) {
       alert("La distribución de premios debe sumar exactamente 100%.");
       setEditLoading(false);
       return;
@@ -583,40 +583,44 @@ export default function GroupDetailPage() {
                 <div>
                   <label className="block text-[10px] text-gray-400 uppercase font-semibold mb-1">Inscripción al Pozo ($)</label>
                   <input 
-                    type="number"
-                    min="0"
+                    type="text"
+                    inputMode="decimal"
                     value={editEntryFee}
-                    onChange={(e) => setEditEntryFee(Number(e.target.value))}
+                    onFocus={(e) => e.target.select()}
+                    onChange={(e) => setEditEntryFee(e.target.value.replace(/[^0-9.]/g, ""))}
                     className="w-full px-3 py-2 bg-black/40 border border-white/10 rounded-xl focus:outline-none focus:ring-1 focus:ring-emerald-500 text-xs font-bold text-emerald-400"
                   />
                 </div>
                 <div>
                   <label className="block text-[10px] text-gray-400 uppercase font-semibold mb-1">Marcador Exacto (pts)</label>
                   <input 
-                    type="number"
-                    min="0"
+                    type="text"
+                    inputMode="numeric"
                     value={editExactScorePoints}
-                    onChange={(e) => setEditExactScorePoints(Number(e.target.value))}
+                    onFocus={(e) => e.target.select()}
+                    onChange={(e) => setEditExactScorePoints(e.target.value.replace(/[^0-9]/g, ""))}
                     className="w-full px-3 py-2 bg-black/40 border border-white/10 rounded-xl focus:outline-none focus:ring-1 focus:ring-emerald-500 text-xs"
                   />
                 </div>
                 <div>
                   <label className="block text-[10px] text-gray-400 uppercase font-semibold mb-1">Acertar Ganador (pts)</label>
                   <input 
-                    type="number"
-                    min="0"
+                    type="text"
+                    inputMode="numeric"
                     value={editCorrectOutcomePoints}
-                    onChange={(e) => setEditCorrectOutcomePoints(Number(e.target.value))}
+                    onFocus={(e) => e.target.select()}
+                    onChange={(e) => setEditCorrectOutcomePoints(e.target.value.replace(/[^0-9]/g, ""))}
                     className="w-full px-3 py-2 bg-black/40 border border-white/10 rounded-xl focus:outline-none focus:ring-1 focus:ring-emerald-500 text-xs"
                   />
                 </div>
                 <div>
                   <label className="block text-[10px] text-gray-400 uppercase font-semibold mb-1">Bono Predicción Única (pts)</label>
                   <input 
-                    type="number"
-                    min="0"
+                    type="text"
+                    inputMode="numeric"
                     value={editUniquePredictionPoints}
-                    onChange={(e) => setEditUniquePredictionPoints(Number(e.target.value))}
+                    onFocus={(e) => e.target.select()}
+                    onChange={(e) => setEditUniquePredictionPoints(e.target.value.replace(/[^0-9]/g, ""))}
                     className="w-full px-3 py-2 bg-black/40 border border-white/10 rounded-xl focus:outline-none focus:ring-1 focus:ring-emerald-500 text-xs"
                   />
                 </div>
@@ -628,30 +632,33 @@ export default function GroupDetailPage() {
                   <div>
                     <label className="block text-[8px] text-gray-400 uppercase mb-0.5">Cuartos</label>
                     <input 
-                      type="number"
-                      min="0"
+                      type="text"
+                      inputMode="numeric"
                       value={editQuarterFinalsBonus}
-                      onChange={(e) => setEditQuarterFinalsBonus(Number(e.target.value))}
+                      onFocus={(e) => e.target.select()}
+                      onChange={(e) => setEditQuarterFinalsBonus(e.target.value.replace(/[^0-9]/g, ""))}
                       className="w-full px-3 py-1.5 bg-black/40 border border-white/10 rounded-xl text-xs"
                     />
                   </div>
                   <div>
                     <label className="block text-[8px] text-gray-400 uppercase mb-0.5">Semis</label>
                     <input 
-                      type="number"
-                      min="0"
+                      type="text"
+                      inputMode="numeric"
                       value={editSemiFinalsBonus}
-                      onChange={(e) => setEditSemiFinalsBonus(Number(e.target.value))}
+                      onFocus={(e) => e.target.select()}
+                      onChange={(e) => setEditSemiFinalsBonus(e.target.value.replace(/[^0-9]/g, ""))}
                       className="w-full px-3 py-1.5 bg-black/40 border border-white/10 rounded-xl text-xs"
                     />
                   </div>
                   <div>
                     <label className="block text-[8px] text-gray-400 uppercase mb-0.5">Final</label>
                     <input 
-                      type="number"
-                      min="0"
+                      type="text"
+                      inputMode="numeric"
                       value={editFinalsBonus}
-                      onChange={(e) => setEditFinalsBonus(Number(e.target.value))}
+                      onFocus={(e) => e.target.select()}
+                      onChange={(e) => setEditFinalsBonus(e.target.value.replace(/[^0-9]/g, ""))}
                       className="w-full px-3 py-1.5 bg-black/40 border border-white/10 rounded-xl text-xs"
                     />
                   </div>
@@ -664,33 +671,33 @@ export default function GroupDetailPage() {
                   <div>
                     <label className="block text-[8px] text-gray-400 uppercase mb-0.5">1º Puesto (%)</label>
                     <input 
-                      type="number"
-                      min="0"
-                      max="100"
+                      type="text"
+                      inputMode="numeric"
                       value={editFirstPlacePercent}
-                      onChange={(e) => setEditFirstPlacePercent(Number(e.target.value))}
+                      onFocus={(e) => e.target.select()}
+                      onChange={(e) => setEditFirstPlacePercent(e.target.value.replace(/[^0-9]/g, ""))}
                       className="w-full px-3 py-1.5 bg-black/40 border border-white/10 rounded-xl text-xs font-bold text-yellow-400"
                     />
                   </div>
                   <div>
                     <label className="block text-[8px] text-gray-400 uppercase mb-0.5">2º Puesto (%)</label>
                     <input 
-                      type="number"
-                      min="0"
-                      max="100"
+                      type="text"
+                      inputMode="numeric"
                       value={editSecondPlacePercent}
-                      onChange={(e) => setEditSecondPlacePercent(Number(e.target.value))}
+                      onFocus={(e) => e.target.select()}
+                      onChange={(e) => setEditSecondPlacePercent(e.target.value.replace(/[^0-9]/g, ""))}
                       className="w-full px-3 py-1.5 bg-black/40 border border-white/10 rounded-xl text-xs"
                     />
                   </div>
                   <div>
                     <label className="block text-[8px] text-gray-400 uppercase mb-0.5">3º Puesto (%)</label>
                     <input 
-                      type="number"
-                      min="0"
-                      max="100"
+                      type="text"
+                      inputMode="numeric"
                       value={editThirdPlacePercent}
-                      onChange={(e) => setEditThirdPlacePercent(Number(e.target.value))}
+                      onFocus={(e) => e.target.select()}
+                      onChange={(e) => setEditThirdPlacePercent(e.target.value.replace(/[^0-9]/g, ""))}
                       className="w-full px-3 py-1.5 bg-black/40 border border-white/10 rounded-xl text-xs"
                     />
                   </div>
