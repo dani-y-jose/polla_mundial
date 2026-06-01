@@ -64,3 +64,10 @@ export const TEAM_FLAGS: Record<string, string> = {
 export function getFlag(team: string): string {
   return TEAM_FLAGS[team] ?? "🏳️";
 }
+
+// The 48 teams competing in the tournament — the canonical roster, derived from
+// TEAM_FLAGS so team pickers (e.g. the champion selector) never drift from the
+// flag/match data. Sorted alphabetically (Spanish locale) for display.
+export const WORLD_CUP_TEAMS = Object.keys(TEAM_FLAGS).sort((a, b) =>
+  a.localeCompare(b, "es")
+);

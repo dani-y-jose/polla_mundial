@@ -19,16 +19,10 @@ import {
 } from "firebase/firestore";
 import { Match, Prediction, User, Group, Invite, Champion } from "@/types";
 import { calculateGroupScores } from "@/lib/scoring";
-import { getFlag } from "@/lib/flags";
+import { getFlag, WORLD_CUP_TEAMS } from "@/lib/flags";
 import { isChampionLocked, getMaxMembersPerGroup, DEFAULT_MAX_MEMBERS_PER_GROUP } from "@/lib/config";
 
 type Tab = "home" | "predictions" | "table" | "groups" | "profile";
-
-const WORLD_CUP_TEAMS = [
-  "Argentina", "Brasil", "Canadá", "Estados Unidos", "México", "España", "Francia", 
-  "Alemania", "Inglaterra", "Italia", "Portugal", "Países Bajos", "Uruguay", "Colombia",
-  "Ecuador", "Chile", "Marruecos", "Japón", "Bélgica", "Croacia", "Senegal"
-].sort();
 
 const PHASE_TRANSLATIONS: Record<string, string> = {
   group: "Fase de Grupos",
@@ -922,7 +916,9 @@ export default function UnifiedDashboard() {
                     </p>
                   ) : championSaved ? (
                     <div className="mt-1 flex items-center justify-between">
-                      <h2 className="text-3xl font-black text-white tracking-tight">{selectedChampion}</h2>
+                      <h2 className="text-3xl font-black text-white tracking-tight">
+                        <span className="mr-2">{getFlag(selectedChampion)}</span>{selectedChampion}
+                      </h2>
                       <span className="px-2.5 py-1 bg-emerald-500/20 border border-emerald-500/30 text-emerald-300 text-[10px] font-bold rounded-full uppercase">
                         ✓ Guardado
                       </span>
@@ -939,7 +935,7 @@ export default function UnifiedDashboard() {
                         className="w-full px-3 py-2 bg-black/40 border border-white/10 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 text-sm"
                       >
                         <option value="">Selecciona tu campeón...</option>
-                        {WORLD_CUP_TEAMS.map(team => <option key={team} value={team}>{team}</option>)}
+                        {WORLD_CUP_TEAMS.map(team => <option key={team} value={team}>{getFlag(team)} {team}</option>)}
                       </select>
                       <button
                         onClick={handleSaveChampion}
@@ -1487,7 +1483,7 @@ export default function UnifiedDashboard() {
                                   {member.displayName} {isSelf && "(Tú)"}
                                 </h4>
                                 <span className="text-[10px] text-gray-500 font-medium">
-                                  Campeón: <span className="text-gray-300 font-semibold">{memberChampions[member.uid] || "Pendiente"}</span>
+                                  Campeón: <span className="text-gray-300 font-semibold">{memberChampions[member.uid] ? `${getFlag(memberChampions[member.uid])} ${memberChampions[member.uid]}` : "Pendiente"}</span>
                                 </span>
                               </div>
                             </div>
