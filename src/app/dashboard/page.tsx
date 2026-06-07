@@ -914,21 +914,33 @@ export default function UnifiedDashboard() {
                     <p className="mt-2 text-xs text-white/80 font-medium">
                       Únete a un grupo para elegir tu campeón.
                     </p>
-                  ) : championSaved ? (
-                    <div className="mt-1 flex items-center justify-between">
-                      <h2 className="text-3xl font-black text-white tracking-tight">
-                        <span className="mr-2">{getFlag(selectedChampion)}</span>{selectedChampion}
-                      </h2>
-                      <span className="px-2.5 py-1 bg-emerald-500/20 border border-emerald-500/30 text-emerald-300 text-[10px] font-bold rounded-full uppercase">
-                        ✓ Guardado
-                      </span>
-                    </div>
                   ) : isChampionLocked() ? (
-                    <p className="mt-2 text-xs text-white/80 font-medium">
-                      El plazo para elegir campeón ya finalizó.
-                    </p>
+                    championSaved ? (
+                      <div className="mt-1 flex items-center justify-between">
+                        <h2 className="text-3xl font-black text-white tracking-tight">
+                          <span className="mr-2">{getFlag(selectedChampion)}</span>{selectedChampion}
+                        </h2>
+                        <span className="px-2.5 py-1 bg-emerald-500/20 border border-emerald-500/30 text-emerald-300 text-[10px] font-bold rounded-full uppercase">
+                          ✓ Guardado
+                        </span>
+                      </div>
+                    ) : (
+                      <p className="mt-2 text-xs text-white/80 font-medium">
+                        El plazo para elegir campeón ya finalizó.
+                      </p>
+                    )
                   ) : (
                     <div className="space-y-3 mt-2">
+                      {championSaved && (
+                        <div className="flex items-center justify-between">
+                          <h2 className="text-3xl font-black text-white tracking-tight">
+                            <span className="mr-2">{getFlag(championsByGroup[selectedGroup.id])}</span>{championsByGroup[selectedGroup.id]}
+                          </h2>
+                          <span className="px-2.5 py-1 bg-emerald-500/20 border border-emerald-500/30 text-emerald-300 text-[10px] font-bold rounded-full uppercase">
+                            ✓ Guardado
+                          </span>
+                        </div>
+                      )}
                       <select
                         value={selectedChampion}
                         onChange={(e) => setSelectedChampion(e.target.value)}
@@ -939,17 +951,17 @@ export default function UnifiedDashboard() {
                       </select>
                       <button
                         onClick={handleSaveChampion}
-                        disabled={!selectedChampion}
+                        disabled={!selectedChampion || selectedChampion === championsByGroup[selectedGroup.id]}
                         className="w-full py-2 bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-black text-xs font-bold rounded-xl transition-all"
                       >
-                        Guardar Elección
+                        {championSaved ? "Actualizar Campeón" : "Guardar Elección"}
                       </button>
                     </div>
                   )}
                 </div>
-                {championSaved && (
+                {selectedGroup && !isChampionLocked() && (
                   <p className="text-[10px] text-emerald-300/80 italic font-medium border-t border-white/5 pt-2">
-                    Las predicciones de campeón quedan guardadas y bloqueadas.
+                    Puedes elegir o cambiar tu campeón hasta el 4 de julio.
                   </p>
                 )}
               </div>

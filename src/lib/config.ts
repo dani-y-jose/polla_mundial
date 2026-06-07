@@ -1,10 +1,11 @@
 import { doc, getDoc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 
-// Opening match of the World Cup 2026 (2026-06-11 20:00 UTC).
-// Champion picks lock at this moment — kept in sync with championDeadline() in
+// Champion picks can be created or changed through the end of July 4, 2026.
+// The cutoff is end-of-day July 4 across the Americas (2026-07-05 06:00 UTC =
+// 23:59 July 4 in UTC-6). Kept in sync with championDeadline() in
 // firestore.rules. The DB rule is authoritative; this guard is for UX only.
-export const CHAMPION_DEADLINE = new Date("2026-06-11T20:00:00Z");
+export const CHAMPION_DEADLINE = new Date("2026-07-05T06:00:00Z");
 
 export function isChampionLocked(now: Date = new Date()): boolean {
   return now.getTime() >= CHAMPION_DEADLINE.getTime();

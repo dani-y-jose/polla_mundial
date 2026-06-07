@@ -13,9 +13,10 @@ service cloud.firestore {
         && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.isAdmin == true;
     }
 
-    // Champions are locked at the opening match (2026-06-11 20:00 UTC).
+    // Champions can be picked or changed through the end of July 4, 2026
+    // (2026-07-05 06:00 UTC = 23:59 July 4 in UTC-6).
     function championDeadline() {
-      return timestamp.date(2026, 6, 11) + duration.value(20, 'h');
+      return timestamp.date(2026, 7, 5) + duration.value(6, 'h');
     }
 
     // A match is open for predictions only while it is still 'upcoming'
