@@ -805,19 +805,36 @@ export default function UnifiedDashboard() {
   });
   const upcomingMatches = matches.filter(m => kickoffMsOf(m) >= startOfTomorrow).slice(0, 3);
 
-  // Real-time missing prediction calculations inside the next 24 hours, for the
-  // currently selected group (predictions are per-group, so "missing" means not
-  // yet saved in this group).
+  // Real-time "starting soon" + missing-prediction alerts for the currently
+  // selected group (predictions are per-group, so "missing" means not yet saved
+  // in this group). These are ephemeral, computed in-memory from `matches` —
+  // Phase A has no backend to fan out reminder docs, so they only show while the
+  // app is open. The scheduled push (Phase B) will own the real, on-time send.
+  const SOON_WINDOW_MIN = 60; // a match counts as "starting soon" within this many minutes of kickoff
   const currentGroupPreds = selectedGroup ? (predictionsByGroup[selectedGroup.id] || {}) : {};
+
+  // Matches kicking off within the next hour (any prediction state). The card
+  // flags whether you still owe a prediction in the selected group.
+  const startingSoonMatches = matches
+    .filter(m => {
+      if (m.status !== "upcoming") return false;
+      const diffMin = (kickoffMsOf(m) - Date.now()) / (1000 * 60);
+      return diffMin > 0 && diffMin <= SOON_WINDOW_MIN;
+    })
+    .map(m => ({ match: m, hasPred: currentGroupPreds[m.id] !== undefined }));
+  const startingSoonIds = new Set(startingSoonMatches.map(s => s.match.id));
+
+  // Unpredicted matches inside the next 24h, excluding those already surfaced as
+  // "starting soon" so a soon-and-unpredicted match shows a single, urgent card.
   const missingPredictions24h = matches.filter(m => {
-    if (m.status !== "upcoming") return false;
-    const kickoffMs = m.kickoffTime instanceof Date ? m.kickoffTime.getTime() : (m.kickoffTime as any).toMillis();
-    const diffHours = (kickoffMs - Date.now()) / (1000 * 60 * 60);
+    if (m.status !== "upcoming" || startingSoonIds.has(m.id)) return false;
+    const diffHours = (kickoffMsOf(m) - Date.now()) / (1000 * 60 * 60);
     const hasPred = currentGroupPreds[m.id] !== undefined;
     return diffHours > 0 && diffHours <= 24 && !hasPred;
   });
 
-  const unreadCount = notifications.filter(n => !n.read).length + missingPredictions24h.length;
+  const unreadCount = notifications.filter(n => !n.read).length
+    + startingSoonMatches.length + missingPredictions24h.length;
 
   // Paginate the predictions list so the bottom of the page stays reachable.
   const PREDICTIONS_PER_PAGE = 10;
@@ -1876,7 +1893,41 @@ export default function UnifiedDashboard() {
 
                 {/* Notifications list */}
                 <div className="overflow-y-auto max-h-[75vh] pr-1 space-y-3 scrollbar-thin">
-                  
+
+                  {/* Injected client-side "match starting soon" alerts (ephemeral) */}
+                  {startingSoonMatches.map(({ match: m, hasPred }) => {
+                    const minsLeft = Math.max(0, Math.round((kickoffMsOf(m) - Date.now()) / (1000 * 60)));
+                    return (
+                      <div
+                        key={`soon_${m.id}`}
+                        className={`p-3.5 rounded-xl space-y-1 relative cursor-pointer transition-all border ${
+                          hasPred
+                            ? "bg-amber-500/10 border-amber-500/20 hover:bg-amber-500/15"
+                            : "bg-red-500/10 border-red-500/20 hover:bg-red-500/15"
+                        }`}
+                        onClick={() => {
+                          setShowNotifDrawer(false);
+                          setActiveTab("predictions");
+                        }}
+                      >
+                        <div className="flex justify-between items-start gap-2">
+                          <span className={`text-[10px] font-black uppercase tracking-wider ${hasPred ? "text-amber-400" : "text-red-400"}`}>
+                            {hasPred ? "Comienza pronto ⏰" : "¡Comienza pronto! ⏰"}
+                          </span>
+                          <span className={`h-1.5 w-1.5 rounded-full ${hasPred ? "bg-amber-500" : "bg-red-500"}`}></span>
+                        </div>
+                        <p className="text-xs font-semibold text-white leading-relaxed">
+                          {hasPred
+                            ? `El partido ${m.homeTeam} vs ${m.awayTeam} comienza pronto.`
+                            : `No has ingresado pronóstico para ${m.homeTeam} vs ${m.awayTeam}, ¡y comienza pronto!`}
+                        </p>
+                        <span className="block text-[8px] text-gray-400 font-medium">
+                          {minsLeft <= 1 ? "Comienza en menos de 1 min" : `Comienza en ${minsLeft} min`}
+                        </span>
+                      </div>
+                    );
+                  })}
+
                   {/* Injected client-side missing prediction alerts */}
                   {missingPredictions24h.map((m) => (
                     <div 
@@ -1899,7 +1950,7 @@ export default function UnifiedDashboard() {
                   ))}
 
                   {/* Standard stored Firestore notifications */}
-                  {notifications.length === 0 && missingPredictions24h.length === 0 ? (
+                  {notifications.length === 0 && missingPredictions24h.length === 0 && startingSoonMatches.length === 0 ? (
                     <div className="py-12 text-center text-xs text-gray-500 italic">
                       No tienes notificaciones en este momento.
                     </div>

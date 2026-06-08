@@ -410,8 +410,12 @@ export default function AdminPage() {
       const predsSnapshot = await getDocs(q);
 
       const batch = writeBatch(db);
+      // Distinct users who predicted this match (across all their groups) — the
+      // audience for the score notification below, since their points just changed.
+      const predictorIds = new Set<string>();
       predsSnapshot.forEach((predDoc) => {
         const predData = predDoc.data() as Prediction;
+        predictorIds.add(predData.userId);
         const points = calculatePoints(predData.predictedHomeScore, predData.predictedAwayScore, hScore, aScore);
 
         const pRef = doc(db, "predictions", predDoc.id);
@@ -420,32 +424,33 @@ export default function AdminPage() {
 
       await batch.commit();
 
-      // 3. Send automatic score update notification to ALL registered users
+      // 3. Notify only the users who predicted this match (their points just
+      // changed) — not every registered account. Reuses predictorIds collected
+      // from the prediction snapshot above, so no extra read is needed.
       try {
         const currentMatch = matches.find(m => m.id === matchId);
         const homeTeamName = currentMatch?.homeTeam || "Equipo Local";
         const awayTeamName = currentMatch?.awayTeam || "Equipo Visitante";
 
-        const usersSnapshot = await getDocs(collection(db, "users"));
-        const notifBatch = writeBatch(db);
+        if (predictorIds.size > 0) {
+          const notifBatch = writeBatch(db);
+          predictorIds.forEach((uId) => {
+            const notifId = `notif_score_${matchId}_${Date.now()}`;
+            const notifRef = doc(db, "users", uId, "notifications", notifId);
 
-        usersSnapshot.forEach((userDoc) => {
-          const uId = userDoc.id;
-          const notifId = `notif_score_${matchId}_${Date.now()}`;
-          const notifRef = doc(db, "users", uId, "notifications", notifId);
-
-          notifBatch.set(notifRef, {
-            id: notifId,
-            userId: uId,
-            title: "Marcador Actualizado ⚽",
-            message: `El partido ${homeTeamName} vs ${awayTeamName} finalizó ${hScore} - ${aScore}. ¡Ingresa a revisar tus puntos!`,
-            timestamp: new Date(),
-            read: false,
-            type: "score_update"
+            notifBatch.set(notifRef, {
+              id: notifId,
+              userId: uId,
+              title: "Marcador Actualizado ⚽",
+              message: `El partido ${homeTeamName} vs ${awayTeamName} finalizó ${hScore} - ${aScore}. ¡Ingresa a revisar tus puntos!`,
+              timestamp: new Date(),
+              read: false,
+              type: "score_update"
+            });
           });
-        });
 
-        await notifBatch.commit();
+          await notifBatch.commit();
+        }
       } catch (notifErr) {
         console.error("Error creating score finalization notifications:", notifErr);
       }
