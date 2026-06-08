@@ -81,6 +81,9 @@ export interface Match {
   refereeName: string;
   refereeCountry: string;
   resolutionMethod: ResolutionMethod;
+  // Set by the kickoff-reminder Cloud Function once it has notified for this
+  // match, so the 15-minute sweep fires the reminder exactly once.
+  reminderSent?: boolean;
 }
 
 export interface Prediction {
