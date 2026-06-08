@@ -18,7 +18,7 @@ import { db } from "@/lib/firebase";
 // Cloud Messaging → "Web Push certificates" → Generate key pair. It's a public
 // key, safe to ship to the browser. Until it's filled in, enrollment is disabled
 // and the UI explains that notifications aren't configured yet.
-const VAPID_KEY = "REPLACE_WITH_WEB_PUSH_VAPID_KEY";
+const VAPID_KEY = "BPv0TijBbeiZIHGvBW-fHsnQWPLBPy3mgdNYNp0UpMaP76mpj8-HstTY1nl-XFd7br-dIDghVaJpcL8fqqcIvMg";
 
 export type EnablePushResult =
   | { ok: true; token: string }
