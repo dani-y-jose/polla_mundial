@@ -410,12 +410,8 @@ export default function AdminPage() {
       const predsSnapshot = await getDocs(q);
 
       const batch = writeBatch(db);
-      // Distinct users who predicted this match (across all their groups) — the
-      // audience for the score notification below, since their points just changed.
-      const predictorIds = new Set<string>();
       predsSnapshot.forEach((predDoc) => {
         const predData = predDoc.data() as Prediction;
-        predictorIds.add(predData.userId);
         const points = calculatePoints(predData.predictedHomeScore, predData.predictedAwayScore, hScore, aScore);
 
         const pRef = doc(db, "predictions", predDoc.id);
@@ -424,39 +420,12 @@ export default function AdminPage() {
 
       await batch.commit();
 
-      // 3. Notify only the users who predicted this match (their points just
-      // changed) — not every registered account. Reuses predictorIds collected
-      // from the prediction snapshot above, so no extra read is needed.
-      try {
-        const currentMatch = matches.find(m => m.id === matchId);
-        const homeTeamName = currentMatch?.homeTeam || "Equipo Local";
-        const awayTeamName = currentMatch?.awayTeam || "Equipo Visitante";
-
-        if (predictorIds.size > 0) {
-          const notifBatch = writeBatch(db);
-          predictorIds.forEach((uId) => {
-            const notifId = `notif_score_${matchId}_${Date.now()}`;
-            const notifRef = doc(db, "users", uId, "notifications", notifId);
-
-            notifBatch.set(notifRef, {
-              id: notifId,
-              userId: uId,
-              title: "Marcador Actualizado ⚽",
-              message: `El partido ${homeTeamName} vs ${awayTeamName} finalizó ${hScore} - ${aScore}. ¡Ingresa a revisar tus puntos!`,
-              timestamp: new Date(),
-              read: false,
-              type: "score_update"
-            });
-          });
-
-          await notifBatch.commit();
-        }
-      } catch (notifErr) {
-        console.error("Error creating score finalization notifications:", notifErr);
-      }
+      // 3. Notifications (in-app doc + web push) are sent server-side by the
+      // onMatchScored Cloud Function, which fires on the status -> "finished"
+      // write above and notifies exactly the users who predicted this match.
 
       setMatches(matches.map(m => m.id === matchId ? { ...m, homeScore: hScore, awayScore: aScore, status: "finished", resolutionMethod } : m));
-      alert("¡Marcador actualizado, puntos recalculados y notificaciones enviadas con éxito!");
+      alert("¡Marcador actualizado y puntos recalculados!");
 
     } catch (err) {
       console.error(err);
