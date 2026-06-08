@@ -46,6 +46,7 @@ Domain:
   matches:create <home> <away> <kickoffISO> [--phase group|round_of_16|quarter_finals|
                  semi_finals|finals] [--city] [--stadium] [--referee] [--id] [--yes]
   matches:seed [--yes]                        insert the 72 WC2026 group matches (missing only)
+  matches:delete <matchId> [--yes]            delete a match AND every prediction tied to it
   matches:score <matchId> <home> <away> [--resolution normal|extra_time|penalties]
                                         [--notify] [--yes]
   predictions:for-match <matchId> [--json]
@@ -395,6 +396,42 @@ async function main() {
       if (!(await confirm("Create this match?", values.yes))) return;
       await db.collection("matches").doc(id).set(payload);
       console.log(`✓ created match ${id}`);
+      break;
+    }
+
+    case "matches:delete": {
+      const matchId = req(args[0], "matchId");
+      const matchRef = db.collection("matches").doc(matchId);
+      const matchDoc = await matchRef.get();
+      const preds = await db.collection("predictions").where("matchId", "==", matchId).get();
+
+      const m = matchDoc.data() as any;
+      const label = matchDoc.exists ? `${m.homeTeam} v ${m.awayTeam}` : "(match doc missing)";
+      console.log(
+        `${matchId}  ${label}\n` +
+          `  match doc:   ${matchDoc.exists ? "delete" : "already gone"}\n` +
+          `  predictions: ${preds.size} — delete (their pointsEarned go with them)`,
+      );
+      if (preds.empty && !matchDoc.exists) {
+        console.log("Nothing to delete.");
+        break;
+      }
+      if (!(await confirm("Delete this match and all its predictions?", values.yes))) return;
+
+      // Cascade predictions, then the match doc. User point totals aren't stored —
+      // leaderboards recompute live from predictions + matches — so no recompute is needed.
+      let batch = db.batch();
+      let n = 0;
+      for (const p of preds.docs) {
+        batch.delete(p.ref);
+        if (++n % 400 === 0) {
+          await batch.commit();
+          batch = db.batch();
+        }
+      }
+      if (matchDoc.exists) batch.delete(matchRef);
+      await batch.commit();
+      console.log(`✓ deleted match ${matchId} and ${preds.size} prediction(s)`);
       break;
     }
 

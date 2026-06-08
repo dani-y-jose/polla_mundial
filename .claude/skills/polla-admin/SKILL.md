@@ -41,6 +41,7 @@ e.g. `--where 'status in ["locked","finished"]'`. `query` defaults to `--limit 5
 set <coll> <docId> '<json>' [--merge] [--yes]      delete <coll> <docId> [--yes]
 matches:create <home> <away> <kickoffISO> [--phase ...] [--city] [--stadium] [--referee] [--id] [--yes]
 matches:seed [--yes]                               # 72 WC2026 group matches, missing only (idempotent)
+matches:delete <matchId> [--yes]                   # delete a match + cascade ALL its predictions
 matches:score <matchId> <home> <away> [--resolution normal|extra_time|penalties] [--notify] [--yes]
 users:make-admin <email|uid> [--yes]               users:revoke-admin <email|uid> [--yes]
 invites:mint --max N [--expires <ISO>]             invites:revoke <code> [--yes]
@@ -49,7 +50,7 @@ invites:mint --max N [--expires <ISO>]             invites:revoke <code> [--yes]
 ## Safety — READ THIS BEFORE ANY WRITE
 - **Reads are always safe.** Run them freely.
 - **Writes hit production.** For `set`, `delete`, `matches:create`, `matches:seed`,
-  `matches:score`, `users:make-admin`/`revoke-admin`, `invites:mint`/`revoke`:
+  `matches:delete`, `matches:score`, `users:make-admin`/`revoke-admin`, `invites:mint`/`revoke`:
   state exactly what you're about to change and **get the user's explicit go-ahead
   first**. Do **not** pass `--yes` unless the user has approved that specific action
   (without `--yes` the CLI prompts interactively, which a non-interactive run will
@@ -71,6 +72,10 @@ JSON (Timestamps as ISO strings). Tables are for human display only.
 - **Score a finished match:** confirm intent → `matches:score <matchId> <h> <a>
   [--resolution ...] --yes`. This writes the score, sets `pointsEarned` on every
   prediction (3/1/0), and recomputes affected users' totals. Add `--notify` only if asked.
+- **Delete a match + its predictions:** `predictions:for-match <matchId> --json` to see
+  the blast radius → confirm → `matches:delete <matchId> --yes`. This removes the match
+  doc and every prediction tied to it (their `pointsEarned` go with them). No separate
+  points cleanup is needed — user totals aren't stored, leaderboards recompute live.
 - **Find a user:** `query users --where "email == someone@example.com" --json`, then
   e.g. `users:make-admin someone@example.com --yes` (after approval).
 - **DB overview:** `stats` (add `--json` to parse).
