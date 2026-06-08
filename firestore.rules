@@ -89,7 +89,7 @@ service cloud.firestore {
       // champion pick before the deadline.
       allow update: if isAdmin() || (
         request.auth.uid == userId
-        && changed(resource.data).hasOnly(['displayName', 'city', 'neighborhood', 'age', 'champion'])
+        && changed(resource.data).hasOnly(['displayName', 'city', 'neighborhood', 'age', 'champion', 'fcmTokens'])
         && (!changed(resource.data).hasAny(['champion']) || request.time < championDeadline())
       );
 

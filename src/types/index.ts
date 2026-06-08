@@ -14,6 +14,10 @@ export interface User {
   // every account — points at the /invites code that admitted them. For a group
   // invite this is also the pending group the dashboard offers to join.
   inviteId?: string;
+  // FCM web-push registration tokens, one per device/browser the user enabled
+  // notifications on. Written client-side via arrayUnion; pruned by the Cloud
+  // Function when a token is rejected by FCM.
+  fcmTokens?: string[];
 }
 
 export interface Invite {

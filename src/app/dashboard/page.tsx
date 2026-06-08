@@ -21,6 +21,7 @@ import { Match, Prediction, User, Group, Invite, Champion } from "@/types";
 import { calculateGroupScores } from "@/lib/scoring";
 import { getFlag, WORLD_CUP_TEAMS } from "@/lib/flags";
 import { isChampionLocked, getMaxMembersPerGroup, DEFAULT_MAX_MEMBERS_PER_GROUP } from "@/lib/config";
+import { enablePushNotifications, pushIsSupported } from "@/lib/messaging";
 
 type Tab = "home" | "predictions" | "table" | "groups" | "profile";
 
@@ -142,6 +143,10 @@ export default function UnifiedDashboard() {
   const [memberChampions, setMemberChampions] = useState<Record<string, string>>({});
   const [notifications, setNotifications] = useState<any[]>([]);
   const [showNotifDrawer, setShowNotifDrawer] = useState(false);
+  // Web-push enrollment state for this device, surfaced in the profile tab.
+  const [pushState, setPushState] = useState<
+    "idle" | "working" | "granted" | "denied" | "unsupported" | "no-vapid" | "error"
+  >("idle");
 
   // Pending group invite to confirm joining — sourced from ?join=CODE (a link
   // followed while signed in / right after sign-up) or, as a fallback, the code
@@ -220,6 +225,44 @@ export default function UnifiedDashboard() {
 
     return () => clearInterval(interval);
   }, [matches]);
+
+  // Detect this device's push capability/permission on mount so the profile tab
+  // shows the right state without the user having to click first.
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      if (!(await pushIsSupported())) {
+        if (active) setPushState("unsupported");
+        return;
+      }
+      if (typeof Notification !== "undefined") {
+        if (Notification.permission === "granted" && active) setPushState("granted");
+        else if (Notification.permission === "denied" && active) setPushState("denied");
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const handleEnablePush = async () => {
+    if (!user) return;
+    setPushState("working");
+    const res = await enablePushNotifications(user.uid);
+    if (res.ok) {
+      setPushState("granted");
+      return;
+    }
+    setPushState(
+      res.reason === "denied"
+        ? "denied"
+        : res.reason === "unsupported"
+        ? "unsupported"
+        : res.reason === "no-vapid"
+        ? "no-vapid"
+        : "error"
+    );
+  };
 
   const handleOpenNotifDrawer = async () => {
     setShowNotifDrawer(true);
@@ -1801,6 +1844,54 @@ export default function UnifiedDashboard() {
                   <div>Ubicación: <span className="font-medium text-white">{dbUser?.city ? `${dbUser.city}, ${dbUser.neighborhood || ""}` : "No registrada"}</span></div>
                   <div>Edad: <span className="font-bold text-white">{dbUser?.age ? `${dbUser.age} años` : "No registrada"}</span></div>
                 </div>
+              </div>
+
+              {/* Push notifications enrollment */}
+              <div className="p-5 bg-white/5 border border-white/10 rounded-2xl space-y-3">
+                <h3 className="font-bold text-sm text-emerald-400 uppercase tracking-wider">Notificaciones</h3>
+                <p className="text-xs text-gray-400 leading-relaxed">
+                  Recibe un aviso en tu teléfono cuando un partido está por comenzar y cuando se
+                  actualiza un marcador, aunque no tengas la app abierta.
+                </p>
+
+                {pushState === "granted" ? (
+                  <div className="flex items-center gap-2 text-xs font-bold text-emerald-400">
+                    <span>✅</span>
+                    <span>Activadas en este dispositivo</span>
+                    <button
+                      onClick={handleEnablePush}
+                      className="ml-auto text-[10px] text-gray-400 underline hover:text-gray-200"
+                    >
+                      Re-registrar
+                    </button>
+                  </div>
+                ) : pushState === "denied" ? (
+                  <p className="text-xs text-amber-400 leading-relaxed">
+                    Has bloqueado las notificaciones. Actívalas desde los ajustes de tu navegador
+                    para este sitio y vuelve a intentar.
+                  </p>
+                ) : pushState === "unsupported" ? (
+                  <p className="text-xs text-amber-400 leading-relaxed">
+                    Tu navegador no soporta notificaciones push. En iPhone, agrega la app a tu
+                    pantalla de inicio (Compartir → “Agregar a inicio”) y vuelve a abrirla desde ahí.
+                  </p>
+                ) : pushState === "no-vapid" ? (
+                  <p className="text-xs text-amber-400 leading-relaxed">
+                    Las notificaciones aún no están configuradas. Inténtalo más tarde.
+                  </p>
+                ) : (
+                  <button
+                    onClick={handleEnablePush}
+                    disabled={pushState === "working"}
+                    className="w-full py-2.5 bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-black rounded-xl font-bold text-xs transition-all"
+                  >
+                    {pushState === "working" ? "Activando…" : "🔔 Activar notificaciones push"}
+                  </button>
+                )}
+
+                {pushState === "error" && (
+                  <p className="text-xs text-red-400">No se pudo activar. Intenta de nuevo.</p>
+                )}
               </div>
 
               {/* Shortcut to the Grupos tab */}

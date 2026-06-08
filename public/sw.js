@@ -39,3 +39,52 @@ self.addEventListener("fetch", (event) => {
       )
   );
 });
+
+// ---- Web push (FCM) ----
+// The Cloud Function sends DATA-only messages (title/body/url under `data`, no
+// top-level `notification`), so the browser does not auto-display anything and
+// we render a single, controlled notification here. Reading both `payload.data`
+// and `payload.notification` keeps us robust to either message shape.
+self.addEventListener("push", (event) => {
+  if (!event.data) return;
+
+  let payload = {};
+  try {
+    payload = event.data.json();
+  } catch {
+    payload = {};
+  }
+
+  const data = payload.data || {};
+  const notif = payload.notification || {};
+  const title = data.title || notif.title || "Polla Mundial ⚽";
+  const options = {
+    body: data.body || notif.body || "",
+    icon: "/icon-192x192.png",
+    badge: "/icon-192x192.png",
+    // `tag` collapses repeats of the same event (e.g. one match) into one bubble.
+    tag: data.tag || undefined,
+    data: { url: data.url || "/dashboard" },
+  };
+
+  event.waitUntil(self.registration.showNotification(title, options));
+});
+
+// Tapping a notification focuses an open tab (navigating it to the target) or
+// opens a new one.
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+  const url = (event.notification.data && event.notification.data.url) || "/dashboard";
+
+  event.waitUntil(
+    self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((clientList) => {
+      for (const client of clientList) {
+        if ("focus" in client) {
+          if ("navigate" in client) client.navigate(url).catch(() => {});
+          return client.focus();
+        }
+      }
+      if (self.clients.openWindow) return self.clients.openWindow(url);
+    })
+  );
+});
