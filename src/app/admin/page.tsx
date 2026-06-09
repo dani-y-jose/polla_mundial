@@ -8,6 +8,7 @@ import { collection, getDocs, doc, setDoc, getDoc, updateDoc, query, where, writ
 import { Match, MatchPhase, ResolutionMethod, User, Prediction, Invite } from "@/types";
 import { calculatePoints } from "@/lib/scoring";
 import { getMaxMembersPerGroup, DEFAULT_MAX_MEMBERS_PER_GROUP } from "@/lib/config";
+import { formatKickoffDateTime } from "@/lib/dates";
 
 const PHASE_TRANSLATIONS: Record<string, string> = {
   group: "Fase de Grupos",
@@ -542,7 +543,7 @@ export default function AdminPage() {
                 <div className="flex-1">
                   <div className="text-sm text-emerald-400">{(PHASE_TRANSLATIONS[match.phase] || match.phase).toUpperCase()}</div>
                   <div className="text-lg font-bold">{match.homeTeam} vs {match.awayTeam}</div>
-                  <div className="text-sm text-gray-400">{new Date(match.kickoffTime instanceof Date ? match.kickoffTime : (match.kickoffTime as any).toMillis()).toLocaleString()}</div>
+                  <div className="text-sm text-gray-400">{formatKickoffDateTime(match.kickoffTime as any)}</div>
                 </div>
                 
                 {match.status !== 'finished' ? (

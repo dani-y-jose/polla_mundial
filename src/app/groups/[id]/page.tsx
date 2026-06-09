@@ -7,6 +7,7 @@ import { auth, db } from "@/lib/firebase";
 import { collection, getDocs, doc, getDoc, query, where, updateDoc } from "firebase/firestore";
 import { Group, User, Match, Prediction } from "@/types";
 import { calculateGroupScores, getOutcome } from "@/lib/scoring";
+import { formatKickoffDateTime } from "@/lib/dates";
 
 const PHASE_TRANSLATIONS: Record<string, string> = {
   group: "Fase de Grupos",
@@ -490,7 +491,7 @@ export default function GroupDetailPage() {
                         <div className="text-lg font-bold mt-0.5">{match.homeTeam} vs {match.awayTeam}</div>
                       </div>
                       <div className="text-right text-xs text-gray-400">
-                        {new Date(kickoffMs).toLocaleString()}
+                        {formatKickoffDateTime(kickoffMs)}
                         {match.status === 'finished' && (
                           <div className="mt-1 text-sm font-bold text-purple-400">
                             Resultado: {match.homeScore} - {match.awayScore} ({match.resolutionMethod ? RESOLUTION_TRANSLATIONS[match.resolutionMethod] || match.resolutionMethod : ""})

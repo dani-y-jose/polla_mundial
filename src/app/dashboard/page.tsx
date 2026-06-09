@@ -21,6 +21,7 @@ import { Match, Prediction, User, Group, Invite, Champion } from "@/types";
 import { calculateGroupScores } from "@/lib/scoring";
 import { getFlag, WORLD_CUP_TEAMS } from "@/lib/flags";
 import { isChampionLocked, getMaxMembersPerGroup, DEFAULT_MAX_MEMBERS_PER_GROUP } from "@/lib/config";
+import { formatKickoffDateTime, formatKickoffTime, formatKickoffDate } from "@/lib/dates";
 import { enablePushNotifications, pushIsSupported } from "@/lib/messaging";
 
 type Tab = "home" | "predictions" | "table" | "groups" | "profile";
@@ -1146,7 +1147,7 @@ export default function UnifiedDashboard() {
                 {todaysMatches.length > 0 ? (
                   todaysMatches.map(match => {
                     const kickoffMs = kickoffMsOf(match);
-                    const timeStr = new Date(kickoffMs).toLocaleTimeString("es", { hour: "2-digit", minute: "2-digit" });
+                    const timeStr = formatKickoffTime(kickoffMs);
                     return (
                       <div key={match.id} className="p-5 bg-white/5 border border-white/10 rounded-2xl flex flex-col items-center gap-4">
                         <div className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-wider">
@@ -1198,8 +1199,8 @@ export default function UnifiedDashboard() {
                   <h3 className="font-bold text-sm text-gray-400 uppercase tracking-wider">Próximos Partidos</h3>
                   {upcomingMatches.map(match => {
                     const kickoffMs = kickoffMsOf(match);
-                    const dateStr = new Date(kickoffMs).toLocaleDateString("es", { weekday: "short", day: "numeric", month: "short" });
-                    const timeStr = new Date(kickoffMs).toLocaleTimeString("es", { hour: "2-digit", minute: "2-digit" });
+                    const dateStr = formatKickoffDate(kickoffMs);
+                    const timeStr = formatKickoffTime(kickoffMs);
                     return (
                       <div key={match.id} className="p-3 bg-white/5 border border-white/5 rounded-xl flex items-center gap-3">
                         <div className="flex items-center gap-1.5 flex-1 min-w-0">
@@ -1329,7 +1330,7 @@ export default function UnifiedDashboard() {
                         <div className="flex items-center gap-2 mb-3">
                           <span className="text-[9px] text-emerald-400 font-bold uppercase">{(PHASE_TRANSLATIONS[match.phase] || match.phase).toUpperCase()}</span>
                           <span className="text-[9px] text-gray-500">·</span>
-                          <span className="text-[9px] text-gray-400">{new Date(kickoffMs).toLocaleString()}</span>
+                          <span className="text-[9px] text-gray-400">{formatKickoffDateTime(kickoffMs)}</span>
                         </div>
 
                         {/* Teams + inputs side by side */}
