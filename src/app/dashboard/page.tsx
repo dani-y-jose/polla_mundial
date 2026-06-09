@@ -513,6 +513,15 @@ export default function UnifiedDashboard() {
     if (!gid) return undefined;
     const own = predictionsByGroup[gid]?.[matchId];
     if (own) return own;
+    // Cross-group prefill is only a convenience for editing before kickoff. Once
+    // the match is locked/finished, a prefill that was never explicitly saved in
+    // this group must not be shown (and must not count) — only `own` predictions do.
+    const match = matches.find((m) => m.id === matchId);
+    if (match) {
+      const kickoffMs = match.kickoffTime instanceof Date ? match.kickoffTime.getTime() : (match.kickoffTime as any).toMillis();
+      const isLocked = Date.now() >= kickoffMs || match.status === "locked" || match.status === "finished";
+      if (isLocked) return undefined;
+    }
     for (const [g, byMatch] of Object.entries(predictionsByGroup)) {
       if (g !== gid && byMatch[matchId]) {
         const src = byMatch[matchId];
