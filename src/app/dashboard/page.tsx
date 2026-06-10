@@ -113,6 +113,8 @@ export default function UnifiedDashboard() {
   const [predictionFilter, setPredictionFilter] = useState<"all" | "group" | "round_of_16" | "quarter_finals" | "semi_finals" | "finals">("all");
   // Sub-filter for the "Grupos" phase: a group letter ("A".."L") or "all".
   const [groupLetterFilter, setGroupLetterFilter] = useState<string>("all");
+  // Status filter for the predictions list: all, still-open (editable), or closed/played.
+  const [predictionStatusFilter, setPredictionStatusFilter] = useState<"todos" | "abiertos" | "finalizados">("abiertos");
   const [predictionPage, setPredictionPage] = useState(1);
   const [searchQuery, setSearchQuery] = useState("");
   
@@ -505,6 +507,11 @@ export default function UnifiedDashboard() {
     setPredictionPage(1);
   }, [groupLetterFilter]);
 
+  // Reset to the first page whenever the status filter changes.
+  useEffect(() => {
+    setPredictionPage(1);
+  }, [predictionStatusFilter]);
+
   // The prediction to show for a match in the currently selected group: the one
   // saved for this group if it exists, otherwise an editable prefill copied from
   // another group the user belongs to (not yet saved here — no id, no points).
@@ -836,6 +843,12 @@ export default function UnifiedDashboard() {
   const kickoffMsOf = (m: Match) =>
     m.kickoffTime instanceof Date ? m.kickoffTime.getTime() : (m.kickoffTime as any).toMillis();
 
+  // A match is "closed" (no longer predictable) once it has kicked off, locked,
+  // or finished. Drives the predictions status filter, the read-only card variant,
+  // and the cross-group prefill guard.
+  const isMatchClosed = (m: Match) =>
+    Date.now() >= kickoffMsOf(m) || m.status === "locked" || m.status === "finished";
+
   const nextMatch = matches.find(m => m.status === "upcoming");
   let countdownText = "";
   if (nextMatch) {
@@ -857,6 +870,9 @@ export default function UnifiedDashboard() {
     return ms >= startOfToday && ms < startOfTomorrow;
   });
   const upcomingMatches = matches.filter(m => kickoffMsOf(m) >= startOfTomorrow).slice(0, 3);
+  // Home tab "Resultados recientes": the 3 most recently finished matches
+  // (matches is sorted ascending, so take the tail and reverse to newest-first).
+  const recentResults = matches.filter(m => m.status === "finished").slice(-3).reverse();
 
   // Real-time "starting soon" + missing-prediction alerts for the currently
   // selected group (predictions are per-group, so "missing" means not yet saved
@@ -902,6 +918,8 @@ export default function UnifiedDashboard() {
     )
   ).sort();
   const filteredPredictionMatches = matches.filter(m => {
+    if (predictionStatusFilter === "abiertos" && isMatchClosed(m)) return false;
+    if (predictionStatusFilter === "finalizados" && !isMatchClosed(m)) return false;
     if (predictionFilter !== "all" && m.phase !== predictionFilter) return false;
     if (predictionFilter === "group" && groupLetterFilter !== "all" && getMatchGroupLetter(m) !== groupLetterFilter) return false;
     return true;
@@ -1222,6 +1240,48 @@ export default function UnifiedDashboard() {
                 </div>
               )}
 
+              {/* Resultados recientes: last 3 finished matches, with a jump into
+                  the predictions tab filtered to Finalizados for the full list. */}
+              {recentResults.length > 0 && (
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <h3 className="font-bold text-sm text-gray-400 uppercase tracking-wider">Resultados Recientes</h3>
+                    <button
+                      onClick={() => { setActiveTab("predictions"); setPredictionStatusFilter("finalizados"); }}
+                      className="text-[10px] font-bold text-emerald-400 hover:text-emerald-300 uppercase tracking-wider"
+                    >
+                      Ver todos →
+                    </button>
+                  </div>
+                  {recentResults.map(match => {
+                    const pred = getDisplayPrediction(match.id);
+                    return (
+                      <div key={match.id} className="p-3 bg-white/5 border border-white/5 rounded-xl">
+                        <div className="flex items-center gap-2">
+                          <div className="flex-1 flex items-center justify-end gap-1.5 min-w-0">
+                            <span className="font-semibold text-[11px] truncate text-right">{match.homeTeam}</span>
+                            <span className="text-base shrink-0">{getFlag(match.homeTeam)}</span>
+                          </div>
+                          <span className="shrink-0 px-2 text-sm font-black tabular-nums">{match.homeScore} - {match.awayScore}</span>
+                          <div className="flex-1 flex items-center gap-1.5 min-w-0">
+                            <span className="text-base shrink-0">{getFlag(match.awayTeam)}</span>
+                            <span className="font-semibold text-[11px] truncate">{match.awayTeam}</span>
+                          </div>
+                        </div>
+                        {pred && pred.pointsEarned !== null && (
+                          <div className="flex items-center justify-center gap-2 mt-1.5">
+                            <span className="text-[9px] text-gray-400">Tu pronóstico: <span className="text-gray-200 font-bold">{pred.predictedHomeScore}-{pred.predictedAwayScore}</span></span>
+                            <span className={`text-[9px] font-black uppercase ${pred.pointsEarned === 3 ? "text-yellow-400" : pred.pointsEarned === 1 ? "text-emerald-400" : "text-red-400"}`}>
+                              {pred.pointsEarned === 3 ? "+3 Pts" : pred.pointsEarned === 1 ? "+1 Pt" : "0 Pts"}
+                            </span>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
             </div>
           )}
 
@@ -1239,6 +1299,27 @@ export default function UnifiedDashboard() {
 
               {/* Filter Pills */}
               <div className="border-b border-white/5 pb-4 space-y-2">
+                {/* Status filter: open (editable) vs finished (read-only) vs all */}
+                <div className="flex flex-wrap items-center gap-1.5 justify-center">
+                  <button
+                    onClick={() => setPredictionStatusFilter("abiertos")}
+                    className={`px-3 py-1 text-[10px] font-bold rounded-full transition-all uppercase tracking-wider ${predictionStatusFilter === "abiertos" ? "bg-amber-500 text-black" : "bg-white/5 text-gray-400 hover:text-white"}`}
+                  >
+                    Abiertos
+                  </button>
+                  <button
+                    onClick={() => setPredictionStatusFilter("finalizados")}
+                    className={`px-3 py-1 text-[10px] font-bold rounded-full transition-all uppercase tracking-wider ${predictionStatusFilter === "finalizados" ? "bg-amber-500 text-black" : "bg-white/5 text-gray-400 hover:text-white"}`}
+                  >
+                    Finalizados
+                  </button>
+                  <button
+                    onClick={() => setPredictionStatusFilter("todos")}
+                    className={`px-3 py-1 text-[10px] font-bold rounded-full transition-all uppercase tracking-wider ${predictionStatusFilter === "todos" ? "bg-amber-500 text-black" : "bg-white/5 text-gray-400 hover:text-white"}`}
+                  >
+                    Todos
+                  </button>
+                </div>
                 <div className="flex flex-wrap items-center gap-1.5 justify-center">
                 <button
                   onClick={() => setPredictionFilter("all")}
@@ -1311,12 +1392,53 @@ export default function UnifiedDashboard() {
               <div className="space-y-4">
                 {pagedPredictionMatches
                   .map(match => {
-                    const kickoffMs = match.kickoffTime instanceof Date ? match.kickoffTime.getTime() : (match.kickoffTime as any).toMillis();
-                    const isLocked = Date.now() >= kickoffMs || match.status === "locked" || match.status === "finished";
+                    const kickoffMs = kickoffMsOf(match);
+                    const isLocked = isMatchClosed(match);
                     const pred: Prediction = getDisplayPrediction(match.id) || ({ predictedHomeScore: "", predictedAwayScore: "" } as unknown as Prediction);
                     // Saved/dirty state for this match in the selected group.
                     const isSaved = !!selectedGroup && !!savedPredictions[`${selectedGroup.id}_${match.id}`];
                     const hasBothScores = `${pred.predictedHomeScore ?? ""}` !== "" && `${pred.predictedAwayScore ?? ""}` !== "";
+
+                    // Closed/played matches render as a compact, read-only card:
+                    // result + your prediction + points, no inputs.
+                    if (isLocked) {
+                      return (
+                        <div key={match.id} className="p-3 bg-white/5 border border-white/10 rounded-xl">
+                          <div className="flex items-center gap-1.5 mb-1.5">
+                            <span className="text-[8px] text-emerald-400 font-bold uppercase">{(PHASE_TRANSLATIONS[match.phase] || match.phase).toUpperCase()}</span>
+                            <span className="text-[8px] text-gray-600">·</span>
+                            <span className="text-[8px] text-gray-500">{formatKickoffDate(kickoffMs)}</span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <div className="flex-1 flex items-center justify-end gap-1.5 min-w-0">
+                              <span className="font-semibold text-[11px] truncate text-right">{match.homeTeam}</span>
+                              <span className="text-base shrink-0">{getFlag(match.homeTeam)}</span>
+                            </div>
+                            <div className="shrink-0 px-2 text-center">
+                              {match.status === "finished"
+                                ? <span className="text-sm font-black tabular-nums">{match.homeScore} - {match.awayScore}</span>
+                                : <span className="text-[10px] text-gray-500 font-bold uppercase">En juego</span>}
+                            </div>
+                            <div className="flex-1 flex items-center gap-1.5 min-w-0">
+                              <span className="text-base shrink-0">{getFlag(match.awayTeam)}</span>
+                              <span className="font-semibold text-[11px] truncate">{match.awayTeam}</span>
+                            </div>
+                          </div>
+                          {(hasBothScores || pred.pointsEarned !== null) && (
+                            <div className="flex items-center justify-center gap-2 mt-1.5">
+                              {hasBothScores && (
+                                <span className="text-[9px] text-gray-400">Tu pronóstico: <span className="text-gray-200 font-bold">{pred.predictedHomeScore}-{pred.predictedAwayScore}</span></span>
+                              )}
+                              {pred.pointsEarned !== null && (
+                                <span className={`text-[9px] font-black uppercase ${pred.pointsEarned === 3 ? "text-yellow-400" : pred.pointsEarned === 1 ? "text-emerald-400" : "text-red-400"}`}>
+                                  {pred.pointsEarned === 3 ? "+3 Pts (Exacto)" : pred.pointsEarned === 1 ? "+1 Pt (Ganador)" : "0 Pts"}
+                                </span>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    }
 
                     return (
                       <div key={match.id} className="p-4 bg-white/5 border border-white/10 rounded-2xl relative overflow-hidden">
