@@ -117,6 +117,8 @@ export default function AdminPage() {
   const [loading, setLoading] = useState(true);
   const [syncLoading, setSyncLoading] = useState(false);
   const [backfillLoading, setBackfillLoading] = useState(false);
+  // Id of the match currently being deleted (disables that card's button).
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   // Global config (admin-only): max members per group.
   const [maxMembers, setMaxMembers] = useState(DEFAULT_MAX_MEMBERS_PER_GROUP);
@@ -434,6 +436,47 @@ export default function AdminPage() {
     }
   };
 
+  // Cascade-delete a match and every prediction tied to it. Mirrors the CLI's
+  // `matches:delete`: points totals aren't stored (leaderboards recompute live
+  // from raw predictions + matches), so removing the predictions is enough —
+  // nothing to recompute. Only `matches` + `predictions` are touched; champions
+  // (per-tournament, not per-match) and notifications are unaffected.
+  const handleDeleteMatch = async (match: Match) => {
+    try {
+      // Fetch first so the confirmation can state the blast radius.
+      const q = query(collection(db, "predictions"), where("matchId", "==", match.id));
+      const predsSnapshot = await getDocs(q);
+      const ok = confirm(
+        `¿Eliminar "${match.homeTeam} vs ${match.awayTeam}" y sus ${predsSnapshot.size} pronóstico(s)? Esta acción no se puede deshacer.`
+      );
+      if (!ok) return;
+
+      setDeletingId(match.id);
+
+      // Cascade predictions, then the match doc, chunking batches well under
+      // Firestore's 500-op limit (same 400 margin the CLI uses).
+      let batch = writeBatch(db);
+      let n = 0;
+      for (const predDoc of predsSnapshot.docs) {
+        batch.delete(doc(db, "predictions", predDoc.id));
+        if (++n % 400 === 0) {
+          await batch.commit();
+          batch = writeBatch(db);
+        }
+      }
+      batch.delete(doc(db, "matches", match.id));
+      await batch.commit();
+
+      setMatches(prev => prev.filter(m => m.id !== match.id));
+      alert(`✓ Partido eliminado junto con ${predsSnapshot.size} pronóstico(s).`);
+    } catch (err) {
+      console.error(err);
+      alert("Error al eliminar el partido.");
+    } finally {
+      setDeletingId(null);
+    }
+  };
+
   if (loading) return <div className="min-h-screen bg-black text-white flex items-center justify-center">Cargando...</div>;
   if (!user) return null;
 
@@ -442,7 +485,12 @@ export default function AdminPage() {
       <div className="max-w-4xl mx-auto space-y-12">
         <div className="flex justify-between items-center">
           <h1 className="text-3xl font-bold">Panel de Administración</h1>
-          <button onClick={() => router.push("/dashboard")} className="text-emerald-400 hover:text-emerald-300">Volver al Tablero</button>
+          <button
+            onClick={() => router.push("/dashboard")}
+            className="inline-flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-semibold rounded-lg shadow-lg shadow-emerald-600/20 transition-colors shrink-0"
+          >
+            <span aria-hidden="true">←</span> Volver al Tablero
+          </button>
         </div>
 
         {/* Sync API Section */}
@@ -555,6 +603,17 @@ export default function AdminPage() {
                     <div className="text-xs text-gray-500 mt-1">{match.resolutionMethod ? RESOLUTION_TRANSLATIONS[match.resolutionMethod] || match.resolutionMethod : ""}</div>
                   </div>
                 )}
+
+                {/* Cascade-delete: removes the match and all its predictions.
+                    Kept visually separate from "Actualizar" to avoid mis-taps. */}
+                <button
+                  onClick={() => handleDeleteMatch(match)}
+                  disabled={deletingId === match.id}
+                  title="Eliminar partido y todos sus pronósticos"
+                  className="h-10 px-4 bg-red-600/20 hover:bg-red-600/40 text-red-300 border border-red-500/40 disabled:opacity-50 rounded text-sm font-medium shrink-0"
+                >
+                  {deletingId === match.id ? "Eliminando..." : "Eliminar"}
+                </button>
               </div>
             ))}
           </div>
