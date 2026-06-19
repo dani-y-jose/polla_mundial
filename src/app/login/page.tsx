@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
+import Image from "next/image";
 import {
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
@@ -22,6 +23,37 @@ type InviteState =
   | { status: "checking" }
   | { status: "invalid"; reason: string }
   | { status: "valid"; code: string; groupId: string | null; groupName?: string; remaining: number };
+
+// Firebase Auth surfaces failures via a stable `error.code`. Map the ones a user
+// can actually hit to friendly Spanish copy instead of leaking the raw SDK
+// message (which is English and exposes internals like "auth/...").
+const AUTH_ERROR_MESSAGES: Record<string, string> = {
+  "auth/invalid-email": "El correo electrónico no es válido.",
+  "auth/user-disabled": "Esta cuenta fue deshabilitada.",
+  "auth/user-not-found": "Correo o contraseña incorrectos.",
+  "auth/wrong-password": "Correo o contraseña incorrectos.",
+  "auth/invalid-credential": "Correo o contraseña incorrectos.",
+  "auth/email-already-in-use": "Ya existe una cuenta con ese correo.",
+  "auth/weak-password": "La contraseña debe tener al menos 6 caracteres.",
+  "auth/too-many-requests": "Demasiados intentos. Espera unos minutos e inténtalo de nuevo.",
+  "auth/network-request-failed": "Error de conexión. Revisa tu internet e inténtalo de nuevo.",
+  "auth/popup-closed-by-user": "Cerraste la ventana antes de completar el inicio de sesión.",
+  "auth/cancelled-popup-request": "Se canceló el inicio de sesión.",
+  "auth/popup-blocked": "El navegador bloqueó la ventana emergente. Habilítala e inténtalo de nuevo.",
+  "auth/account-exists-with-different-credential":
+    "Ya existe una cuenta con ese correo usando otro método de acceso.",
+  "auth/operation-not-allowed": "Este método de acceso no está habilitado.",
+};
+
+// Resolve a user-facing message: a known Firebase code wins; otherwise our own
+// provisioning errors (thrown with safe Spanish messages and no code) pass
+// through; everything else falls back to a generic message.
+function authErrorMessage(err: unknown, fallback: string): string {
+  const code = (err as { code?: string })?.code;
+  if (code) return AUTH_ERROR_MESSAGES[code] ?? fallback;
+  if (err instanceof Error && err.message) return err.message;
+  return fallback;
+}
 
 export default function LoginPage() {
   const [isSignUp, setIsSignUp] = useState(false);
@@ -49,9 +81,13 @@ export default function LoginPage() {
 
   // Resolve the single invite from the URL (?invite=CODE) so we know whether to
   // show the sign-up form and which group (if any) the account will be offered.
+  // Resolving the invite reads the browser URL, so this state must be derived
+  // client-side after hydration — the setState calls here are intentional, not a
+  // syncing-effect smell.
   useEffect(() => {
     const code = inviteCodeFromUrl;
     if (!code) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setInvite({ status: "none" });
       return;
     }
@@ -173,9 +209,9 @@ export default function LoginPage() {
         await signInWithEmailAndPassword(auth, email, password);
         router.push(dashboardTarget());
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
       manualAuthInProgress.current = false;
-      setError(err.message || "Error al autenticar");
+      setError(authErrorMessage(err, "Error al autenticar"));
     } finally {
       setLoading(false);
     }
@@ -205,10 +241,10 @@ export default function LoginPage() {
       }
 
       router.push(dashboardTarget());
-    } catch (err: any) {
+    } catch (err: unknown) {
       manualAuthInProgress.current = false;
       console.error(err);
-      setError(err.message || "Error al iniciar sesión con Google");
+      setError(authErrorMessage(err, "Error al iniciar sesión con Google"));
     } finally {
       setLoading(false);
     }
@@ -219,10 +255,14 @@ export default function LoginPage() {
   return (
     <div className="min-h-screen flex flex-col items-center justify-center bg-black text-white px-4 py-8">
       {/* Mascots — crisp foreground banner above the card */}
-      <img
+      <Image
         src="/mascots.png"
         alt="Mascotas del Mundial 2026"
+        width={1200}
+        height={675}
+        priority
         className="w-full max-w-md -mb-4 select-none pointer-events-none drop-shadow-2xl"
+        style={{ height: "auto" }}
       />
 
       <div className="max-w-md w-full p-8 bg-white/5 border border-white/10 rounded-2xl backdrop-blur-xl">

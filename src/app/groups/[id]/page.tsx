@@ -2,12 +2,16 @@
 
 import { useEffect, useState } from "react";
 import { useRouter, useParams } from "next/navigation";
-import { onAuthStateChanged } from "firebase/auth";
+import { onAuthStateChanged, type User as FirebaseUser } from "firebase/auth";
 import { auth, db } from "@/lib/firebase";
 import { collection, getDocs, doc, getDoc, query, where, updateDoc } from "firebase/firestore";
 import { Group, User, Match, Prediction } from "@/types";
+import { groupSchema, userSchema, matchSchema, predictionSchema } from "@/lib/schemas";
+import { parseDoc, parseDocs } from "@/lib/parse";
+import { groupRulesInputSchema, prizeInputSchema, entryFeeSchema, firstError } from "@/lib/form-schemas";
 import { calculateGroupScores, getOutcome } from "@/lib/scoring";
-import { formatKickoffDateTime } from "@/lib/dates";
+import { formatKickoffDateTime, toMs } from "@/lib/dates";
+import { useDialog } from "@/components/DialogProvider";
 
 const PHASE_TRANSLATIONS: Record<string, string> = {
   group: "Fase de Grupos",
@@ -26,8 +30,9 @@ const RESOLUTION_TRANSLATIONS: Record<string, string> = {
 export default function GroupDetailPage() {
   const params = useParams();
   const groupId = params.id as string;
+  const { alert: showAlert } = useDialog();
 
-  const [user, setUser] = useState<any>(null);
+  const [user, setUser] = useState<FirebaseUser | null>(null);
   const [group, setGroup] = useState<Group | null>(null);
   const [creatorName, setCreatorName] = useState("");
   const [members, setMembers] = useState<User[]>([]);
@@ -56,15 +61,27 @@ export default function GroupDetailPage() {
 
   const router = useRouter();
 
+  // Show the "group created" modal when arriving with ?created=true, then strip
+  // the param. This must run client-side after hydration (it reads the browser
+  // URL), so the setState here is intentional and not a syncing-effect smell.
   useEffect(() => {
     if (typeof window !== "undefined") {
       const params = new URLSearchParams(window.location.search);
       if (params.get("created") === "true") {
+        // eslint-disable-next-line react-hooks/set-state-in-effect
         setShowSuccessModal(true);
         const cleanUrl = window.location.protocol + "//" + window.location.host + window.location.pathname;
         window.history.replaceState({ path: cleanUrl }, "", cleanUrl);
       }
     }
+  }, []);
+
+  // 1-second ticking clock so the per-match lock check stays live in render
+  // without calling the impure Date.now() during render.
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
   }, []);
 
   useEffect(() => {
@@ -80,22 +97,17 @@ export default function GroupDetailPage() {
       try {
         // 1. Fetch Group Details
         const groupDoc = await getDoc(doc(db, "groups", groupId));
-        if (!groupDoc.exists()) {
+        const groupData = parseDoc(groupSchema, groupDoc);
+        if (!groupData) {
           setError("Grupo no encontrado.");
           setLoading(false);
           return;
         }
-
-        const groupData = { id: groupDoc.id, ...groupDoc.data() } as Group;
         setGroup(groupData);
 
         // Fetch Creator's Display Name
         const creatorDoc = await getDoc(doc(db, "users", groupData.creatorId));
-        if (creatorDoc.exists()) {
-          setCreatorName((creatorDoc.data() as User).displayName);
-        } else {
-          setCreatorName("Desconocido");
-        }
+        setCreatorName(parseDoc(userSchema, creatorDoc)?.displayName ?? "Desconocido");
 
         // Verify membership
         if (!groupData.members.includes(currentUser.uid)) {
@@ -127,31 +139,23 @@ export default function GroupDetailPage() {
         for (const chunk of chunks) {
           const uQuery = query(collection(db, "users"), where("uid", "in", chunk));
           const uSnapshot = await getDocs(uQuery);
-          uSnapshot.forEach((doc) => {
-            membersData.push({ uid: doc.id, ...doc.data() } as User);
-          });
+          membersData.push(...parseDocs(userSchema, uSnapshot));
         }
 
         // 3. Fetch Matches
         const matchesSnapshot = await getDocs(collection(db, "matches"));
-        const matchesData: Match[] = [];
-        matchesSnapshot.forEach((doc) => {
-          matchesData.push({ id: doc.id, ...doc.data() } as Match);
-        });
+        const matchesData = parseDocs(matchSchema, matchesSnapshot);
         matchesData.sort((a, b) => {
-          const timeA = a.kickoffTime instanceof Date ? a.kickoffTime.getTime() : (a.kickoffTime as any).toMillis();
-          const timeB = b.kickoffTime instanceof Date ? b.kickoffTime.getTime() : (b.kickoffTime as any).toMillis();
+          const timeA = toMs(a.kickoffTime);
+          const timeB = toMs(b.kickoffTime);
           return timeA - timeB;
         });
         setMatches(matchesData);
 
         // 4. Fetch this group's predictions (predictions are scoped by groupId).
-        const predsData: Prediction[] = [];
         const pQuery = query(collection(db, "predictions"), where("groupId", "==", groupId));
         const pSnapshot = await getDocs(pQuery);
-        pSnapshot.forEach((doc) => {
-          predsData.push({ id: doc.id, ...doc.data() } as Prediction);
-        });
+        const predsData = parseDocs(predictionSchema, pSnapshot);
         setAllPredictions(predsData);
 
         // 5. Calculate scores dynamically per group rules
@@ -200,37 +204,50 @@ export default function GroupDetailPage() {
     setEditLoading(true);
     setEditSuccess("");
 
-    if (Number(editFirstPlacePercent) + Number(editSecondPlacePercent) + Number(editThirdPlacePercent) !== 100) {
-      alert("La distribución de premios debe sumar exactamente 100%.");
+    const rulesParsed = groupRulesInputSchema.safeParse({
+      exactScorePoints: editExactScorePoints,
+      correctOutcomePoints: editCorrectOutcomePoints,
+      uniquePredictionPoints: editUniquePredictionPoints,
+      quarterFinalsBonus: editQuarterFinalsBonus,
+      semiFinalsBonus: editSemiFinalsBonus,
+      finalsBonus: editFinalsBonus,
+    });
+    const prizeParsed = prizeInputSchema.safeParse({
+      firstPlacePercent: editFirstPlacePercent,
+      secondPlacePercent: editSecondPlacePercent,
+      thirdPlacePercent: editThirdPlacePercent,
+    });
+    const feeParsed = entryFeeSchema.safeParse(editEntryFee);
+    if (!rulesParsed.success) {
+      await showAlert(firstError(rulesParsed.error));
+      setEditLoading(false);
+      return;
+    }
+    if (!prizeParsed.success) {
+      await showAlert(firstError(prizeParsed.error));
+      setEditLoading(false);
+      return;
+    }
+    if (!feeParsed.success) {
+      await showAlert(firstError(feeParsed.error));
       setEditLoading(false);
       return;
     }
 
     try {
       const groupRef = doc(db, "groups", group.id);
-      const updatedRules = {
-        exactScorePoints: Number(editExactScorePoints),
-        correctOutcomePoints: Number(editCorrectOutcomePoints),
-        uniquePredictionPoints: Number(editUniquePredictionPoints),
-        quarterFinalsBonus: Number(editQuarterFinalsBonus),
-        semiFinalsBonus: Number(editSemiFinalsBonus),
-        finalsBonus: Number(editFinalsBonus),
-      };
-      const updatedPrize = {
-        firstPlacePercent: Number(editFirstPlacePercent),
-        secondPlacePercent: Number(editSecondPlacePercent),
-        thirdPlacePercent: Number(editThirdPlacePercent),
-      };
+      const updatedRules = rulesParsed.data;
+      const updatedPrize = prizeParsed.data;
 
       await updateDoc(groupRef, {
-        entryFee: Number(editEntryFee),
+        entryFee: feeParsed.data,
         rules: updatedRules,
         prizeDistribution: updatedPrize
       });
 
       const updatedGroup = {
         ...group,
-        entryFee: Number(editEntryFee),
+        entryFee: feeParsed.data,
         rules: updatedRules,
         prizeDistribution: updatedPrize
       };
@@ -254,7 +271,7 @@ export default function GroupDetailPage() {
       setEditSuccess("¡Configuración del grupo actualizada con éxito!");
     } catch (err) {
       console.error(err);
-      alert("Error al actualizar la configuración del grupo.");
+      await showAlert("Error al actualizar la configuración del grupo.");
     } finally {
       setEditLoading(false);
     }
@@ -478,8 +495,8 @@ export default function GroupDetailPage() {
               </div>
             ) : (
               matches.map((match) => {
-                const kickoffMs = match.kickoffTime instanceof Date ? match.kickoffTime.getTime() : (match.kickoffTime as any).toMillis();
-                const isLocked = Date.now() >= kickoffMs || match.status === 'locked' || match.status === 'finished';
+                const kickoffMs = toMs(match.kickoffTime);
+                const isLocked = now >= kickoffMs || match.status === 'locked' || match.status === 'finished';
 
                 return (
                   <div key={match.id} className="p-6 bg-white/5 border border-white/10 rounded-2xl space-y-4">

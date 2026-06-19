@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { onAuthStateChanged } from "firebase/auth";
+import { onAuthStateChanged, type User as FirebaseUser } from "firebase/auth";
 import { auth, db } from "@/lib/firebase";
 import { 
   collection, 
@@ -17,12 +17,19 @@ import {
   onSnapshot,
   writeBatch
 } from "firebase/firestore";
-import { Match, Prediction, User, Group, Invite, Champion } from "@/types";
+import { Match, Prediction, User, Group, Invite } from "@/types";
+// Aliased + type-only so it doesn't shadow the DOM `Notification` global used
+// for web-push permission checks below.
+import type { Notification as AppNotification } from "@/types";
+import { matchSchema, predictionSchema, userSchema, groupSchema, championSchema, notificationSchema } from "@/lib/schemas";
+import { parseDoc, parseDocs } from "@/lib/parse";
+import { predictionInputSchema, prizeInputSchema, groupRulesInputSchema, firstError } from "@/lib/form-schemas";
 import { calculateGroupScores } from "@/lib/scoring";
 import { getFlag, WORLD_CUP_TEAMS } from "@/lib/flags";
 import { isChampionLocked, getMaxMembersPerGroup, DEFAULT_MAX_MEMBERS_PER_GROUP } from "@/lib/config";
-import { formatKickoffDateTime, formatKickoffTime, formatKickoffDate } from "@/lib/dates";
+import { formatKickoffDateTime, formatKickoffTime, formatKickoffDate, toMs } from "@/lib/dates";
 import { enablePushNotifications, pushIsSupported } from "@/lib/messaging";
+import { useDialog } from "@/components/DialogProvider";
 
 type Tab = "home" | "predictions" | "table" | "groups" | "profile";
 
@@ -32,12 +39,6 @@ const PHASE_TRANSLATIONS: Record<string, string> = {
   quarter_finals: "Cuartos de Final",
   semi_finals: "Semifinales",
   finals: "Gran Final"
-};
-
-const RESOLUTION_TRANSLATIONS: Record<string, string> = {
-  normal: "90 Minutos",
-  extra_time: "Tiempo Extra",
-  penalties: "Penales"
 };
 
 // Group-stage matches encode their group letter in the seeded id, e.g.
@@ -87,8 +88,8 @@ export default function UnifiedDashboard() {
   const [activeTab, setActiveTab] = useState<Tab>("home");
   
   // Data State
-  const [user, setUser] = useState<any>(null);
-  const [dbUser, setDbUser] = useState<any>(null);
+  const [user, setUser] = useState<FirebaseUser | null>(null);
+  const [dbUser, setDbUser] = useState<User | null>(null);
   const [groups, setGroups] = useState<Group[]>([]);
   const [selectedGroup, setSelectedGroup] = useState<Group | null>(null);
   const [groupMembers, setGroupMembers] = useState<User[]>([]);
@@ -144,7 +145,7 @@ export default function UnifiedDashboard() {
   // Champion pick per member for the currently selected group (uid -> team),
   // used by the leaderboard. Loaded alongside the group's leaderboard.
   const [memberChampions, setMemberChampions] = useState<Record<string, string>>({});
-  const [notifications, setNotifications] = useState<any[]>([]);
+  const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [showNotifDrawer, setShowNotifDrawer] = useState(false);
   // Web-push enrollment state for this device, surfaced in the profile tab.
   const [pushState, setPushState] = useState<
@@ -159,41 +160,15 @@ export default function UnifiedDashboard() {
   const [pendingDismissed, setPendingDismissed] = useState(false);
 
   const router = useRouter();
+  const { alert: showAlert } = useDialog();
 
+  // A 1-second ticking clock so kickoff/lock checks and countdowns stay live in
+  // render without calling the impure Date.now() during render.
+  const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
-    let unsubscribeNotifs: (() => void) | undefined;
-
-    const unsubscribeAuth = onAuthStateChanged(auth, async (currentUser) => {
-      if (!currentUser) {
-        router.push("/login");
-        return;
-      }
-      setUser(currentUser);
-      await loadAllData(currentUser.uid);
-
-      // Listen to notifications in real-time
-      const notifsQuery = collection(db, "users", currentUser.uid, "notifications");
-      unsubscribeNotifs = onSnapshot(notifsQuery, (snapshot) => {
-        const notifsData: any[] = [];
-        snapshot.forEach((doc) => {
-          notifsData.push({ id: doc.id, ...doc.data() });
-        });
-        notifsData.sort((a, b) => {
-          const timeA = a.timestamp instanceof Date ? a.timestamp.getTime() : (a.timestamp ? (a.timestamp as any).toMillis?.() || new Date(a.timestamp).getTime() : 0);
-          const timeB = b.timestamp instanceof Date ? b.timestamp.getTime() : (b.timestamp ? (b.timestamp as any).toMillis?.() || new Date(b.timestamp).getTime() : 0);
-          return timeB - timeA; // Descending
-        });
-        setNotifications(notifsData);
-      }, (err) => {
-        console.error("Error listening to notifications:", err);
-      });
-    });
-
-    return () => {
-      unsubscribeAuth();
-      if (unsubscribeNotifs) unsubscribeNotifs();
-    };
-  }, [router]);
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, []);
 
   // Auto-Lock Scheduler for User Dashboard
   useEffect(() => {
@@ -206,7 +181,7 @@ export default function UnifiedDashboard() {
 
       for (let i = 0; i < updatedMatches.length; i++) {
         const m = updatedMatches[i];
-        const kickoffMs = m.kickoffTime instanceof Date ? m.kickoffTime.getTime() : (m.kickoffTime as any).toMillis();
+        const kickoffMs = toMs(m.kickoffTime);
         
         if (m.status === "upcoming" && now >= kickoffMs) {
           try {
@@ -287,25 +262,19 @@ export default function UnifiedDashboard() {
   };
 
   // Combined fetch function to pull all necessary Firestore state
-  const loadAllData = async (uid: string) => {
+  async function loadAllData(uid: string) {
     try {
       setLoading(true);
 
       // 1. Fetch User profile document
-      let userData: any = null;
       const userDoc = await getDoc(doc(db, "users", uid));
-      if (userDoc.exists()) {
-        userData = userDoc.data();
-        setDbUser(userData);
-      }
+      const userData = parseDoc(userSchema, userDoc);
+      if (userData) setDbUser(userData);
 
       // 2. Fetch User's Groups
       const groupQuery = query(collection(db, "groups"), where("members", "array-contains", uid));
       const groupSnapshot = await getDocs(groupQuery);
-      const groupsData: Group[] = [];
-      groupSnapshot.forEach((doc) => {
-        groupsData.push({ id: doc.id, ...doc.data() } as Group);
-      });
+      const groupsData = parseDocs(groupSchema, groupSnapshot);
       setGroups(groupsData);
 
       // Global member cap (admin-configurable), for capacity display + invite maxUses.
@@ -337,13 +306,10 @@ export default function UnifiedDashboard() {
       // 3. Fetch Matches (must happen before computing the leaderboard, which
       // depends on the finished matches to award points).
       const matchesSnapshot = await getDocs(collection(db, "matches"));
-      const matchesData: Match[] = [];
-      matchesSnapshot.forEach((doc) => {
-        matchesData.push({ id: doc.id, ...doc.data() } as Match);
-      });
+      const matchesData = parseDocs(matchSchema, matchesSnapshot);
       matchesData.sort((a, b) => {
-        const timeA = a.kickoffTime instanceof Date ? a.kickoffTime.getTime() : (a.kickoffTime as any).toMillis();
-        const timeB = b.kickoffTime instanceof Date ? b.kickoffTime.getTime() : (b.kickoffTime as any).toMillis();
+        const timeA = toMs(a.kickoffTime);
+        const timeB = toMs(b.kickoffTime);
         return timeA - timeB;
       });
       setMatches(matchesData);
@@ -356,8 +322,8 @@ export default function UnifiedDashboard() {
       const byGroup: Record<string, Record<string, Prediction>> = {};
       const savedSeed: Record<string, boolean> = {};
       predsSnapshot.forEach((doc) => {
-        const data = { id: doc.id, ...doc.data() } as Prediction;
-        if (!data.groupId) return; // ignore any legacy global predictions
+        const data = parseDoc(predictionSchema, doc);
+        if (!data || !data.groupId) return; // ignore malformed / legacy global predictions
         (byGroup[data.groupId] ??= {})[data.matchId] = data;
         // Everything loaded from Firestore is, by definition, already saved.
         savedSeed[`${data.groupId}_${data.matchId}`] = true;
@@ -370,8 +336,8 @@ export default function UnifiedDashboard() {
       const champsSnapshot = await getDocs(champsQuery);
       const champByGroup: Record<string, string> = {};
       champsSnapshot.forEach((doc) => {
-        const c = doc.data() as Champion;
-        if (c.groupId && c.champion) champByGroup[c.groupId] = c.champion;
+        const c = parseDoc(championSchema, doc);
+        if (c && c.groupId && c.champion) champByGroup[c.groupId] = c.champion;
       });
       setChampionsByGroup(champByGroup);
 
@@ -390,10 +356,48 @@ export default function UnifiedDashboard() {
     } finally {
       setLoading(false);
     }
-  };
+  }
+
+  // Auth gate + initial load + notifications listener. Declared after
+  // loadAllData so the listener can call it (and so it isn't referenced before
+  // its declaration). Runs once on mount.
+  useEffect(() => {
+    let unsubscribeNotifs: (() => void) | undefined;
+
+    const unsubscribeAuth = onAuthStateChanged(auth, async (currentUser) => {
+      if (!currentUser) {
+        router.push("/login");
+        return;
+      }
+      setUser(currentUser);
+      await loadAllData(currentUser.uid);
+
+      // Listen to notifications in real-time
+      const notifsQuery = collection(db, "users", currentUser.uid, "notifications");
+      unsubscribeNotifs = onSnapshot(notifsQuery, (snapshot) => {
+        const notifsData = parseDocs(notificationSchema, snapshot);
+        notifsData.sort((a, b) => {
+          const timeA = toMs(a.timestamp);
+          const timeB = toMs(b.timestamp);
+          return timeB - timeA; // Descending
+        });
+        setNotifications(notifsData);
+      }, (err) => {
+        console.error("Error listening to notifications:", err);
+      });
+    });
+
+    return () => {
+      unsubscribeAuth();
+      if (unsubscribeNotifs) unsubscribeNotifs();
+    };
+    // Mount-once auth listener; loadAllData is a stable hoisted function and
+    // intentionally not a dependency (adding it would re-subscribe every render).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [router]);
 
   // Load member profiles for leaderboard
-  const loadGroupLeaderboard = async (group: Group, matchesList?: Match[]) => {
+  async function loadGroupLeaderboard(group: Group, matchesList?: Match[]) {
     try {
       const membersData: User[] = [];
       // Fetch members in chunks of 10 (Firestore limitations)
@@ -401,27 +405,22 @@ export default function UnifiedDashboard() {
         const chunk = group.members.slice(i, i + 10);
         const uQuery = query(collection(db, "users"), where("uid", "in", chunk));
         const uSnapshot = await getDocs(uQuery);
-        uSnapshot.forEach((doc) => {
-          membersData.push({ uid: doc.id, ...doc.data() } as User);
-        });
+        membersData.push(...parseDocs(userSchema, uSnapshot));
       }
 
       // Fetch this group's predictions in one query (predictions are scoped by
       // groupId now, so no need to chunk by member).
-      const predsData: Prediction[] = [];
       const pQuery = query(collection(db, "predictions"), where("groupId", "==", group.id));
       const pSnapshot = await getDocs(pQuery);
-      pSnapshot.forEach((doc) => {
-        predsData.push({ id: doc.id, ...doc.data() } as Prediction);
-      });
+      const predsData = parseDocs(predictionSchema, pSnapshot);
 
       // Fetch this group's champion picks (uid -> team) for display.
       const champMap: Record<string, string> = {};
       const cQuery = query(collection(db, "champions"), where("groupId", "==", group.id));
       const cSnapshot = await getDocs(cQuery);
       cSnapshot.forEach((doc) => {
-        const c = doc.data() as Champion;
-        if (c.userId && c.champion) champMap[c.userId] = c.champion;
+        const c = parseDoc(championSchema, doc);
+        if (c && c.userId && c.champion) champMap[c.userId] = c.champion;
       });
       setMemberChampions(champMap);
 
@@ -452,7 +451,7 @@ export default function UnifiedDashboard() {
     } catch (err) {
       console.error("Error loading leaderboard:", err);
     }
-  };
+  }
 
   const handleGroupChange = async (groupId: string) => {
     const selected = groups.find(g => g.id === groupId);
@@ -468,11 +467,11 @@ export default function UnifiedDashboard() {
   const handleSaveChampion = async () => {
     if (!selectedChampion || !user) return;
     if (!selectedGroup) {
-      alert("Debes seleccionar un grupo para elegir tu campeón.");
+      await showAlert("Debes seleccionar un grupo para elegir tu campeón.");
       return;
     }
     if (isChampionLocked()) {
-      alert("El plazo para elegir o cambiar de campeón ya finalizó.");
+      await showAlert("El plazo para elegir o cambiar de campeón ya finalizó.");
       return;
     }
     try {
@@ -488,29 +487,28 @@ export default function UnifiedDashboard() {
       setChampionSaved(true);
       setChampionsByGroup(prev => ({ ...prev, [selectedGroup.id]: selectedChampion }));
       setMemberChampions(prev => ({ ...prev, [user.uid]: selectedChampion }));
-      alert("¡Campeón guardado con éxito!");
+      await showAlert("¡Campeón guardado con éxito!");
     } catch (err) {
       console.error(err);
-      alert("Error al guardar el campeón.");
+      await showAlert("Error al guardar el campeón.");
     }
   };
 
-  // Reset to the first page whenever the phase filter changes, and drop any
-  // group-letter sub-filter (it only applies to the "Grupos" phase).
-  useEffect(() => {
+  // Reset pagination when any prediction filter changes, and drop the group-
+  // letter sub-filter when the phase changes. Done by comparing the previous
+  // value during render — React's recommended alternative to a state-syncing
+  // effect (no extra render pass, no setState-in-effect).
+  const filterSignature = `${predictionFilter}|${predictionStatusFilter}|${groupLetterFilter}`;
+  const [prevFilterSignature, setPrevFilterSignature] = useState(filterSignature);
+  if (filterSignature !== prevFilterSignature) {
+    setPrevFilterSignature(filterSignature);
     setPredictionPage(1);
+  }
+  const [prevPredictionFilter, setPrevPredictionFilter] = useState(predictionFilter);
+  if (predictionFilter !== prevPredictionFilter) {
+    setPrevPredictionFilter(predictionFilter);
     setGroupLetterFilter("all");
-  }, [predictionFilter]);
-
-  // Reset to the first page whenever the group-letter sub-filter changes.
-  useEffect(() => {
-    setPredictionPage(1);
-  }, [groupLetterFilter]);
-
-  // Reset to the first page whenever the status filter changes.
-  useEffect(() => {
-    setPredictionPage(1);
-  }, [predictionStatusFilter]);
+  }
 
   // The prediction to show for a match in the currently selected group: the one
   // saved for this group if it exists, otherwise an editable prefill copied from
@@ -518,7 +516,7 @@ export default function UnifiedDashboard() {
   // Returns undefined when the user has no prediction for this match anywhere.
   const getDisplayPrediction = (matchId: string): Prediction | undefined => {
     const gid = selectedGroup?.id;
-    if (!gid) return undefined;
+    if (!gid || !user) return undefined;
     const own = predictionsByGroup[gid]?.[matchId];
     if (own) return own;
     // Cross-group prefill is only a convenience for editing before kickoff. Once
@@ -526,8 +524,8 @@ export default function UnifiedDashboard() {
     // this group must not be shown (and must not count) — only `own` predictions do.
     const match = matches.find((m) => m.id === matchId);
     if (match) {
-      const kickoffMs = match.kickoffTime instanceof Date ? match.kickoffTime.getTime() : (match.kickoffTime as any).toMillis();
-      const isLocked = Date.now() >= kickoffMs || match.status === "locked" || match.status === "finished";
+      const kickoffMs = toMs(match.kickoffTime);
+      const isLocked = now >= kickoffMs || match.status === "locked" || match.status === "finished";
       if (isLocked) return undefined;
     }
     for (const [g, byMatch] of Object.entries(predictionsByGroup)) {
@@ -549,7 +547,7 @@ export default function UnifiedDashboard() {
 
   const handlePredictionChange = (matchId: string, team: "home" | "away", scoreStr: string) => {
     const gid = selectedGroup?.id;
-    if (!gid) return;
+    if (!gid || !user) return;
     // Keep only digits and allow an empty value so the field can be cleared.
     const sanitized = scoreStr.replace(/\D/g, "").slice(0, 2);
 
@@ -582,13 +580,14 @@ export default function UnifiedDashboard() {
   };
 
   const submitPrediction = async (matchId: string) => {
+    if (!user) return;
     // Block if user is in 0 groups
     if (groups.length === 0) {
-      alert("Para ingresar pronósticos debes unirte a un grupo primero.");
+      await showAlert("Para ingresar pronósticos debes unirte a un grupo primero.");
       return;
     }
     if (!selectedGroup) {
-      alert("Selecciona un grupo para guardar tu pronóstico.");
+      await showAlert("Selecciona un grupo para guardar tu pronóstico.");
       return;
     }
     const gid = selectedGroup.id;
@@ -600,18 +599,25 @@ export default function UnifiedDashboard() {
     const homeRaw = `${prediction.predictedHomeScore}`;
     const awayRaw = `${prediction.predictedAwayScore}`;
     if (homeRaw === "" || awayRaw === "") {
-      alert("Ingresa ambos marcadores antes de guardar.");
+      await showAlert("Ingresa ambos marcadores antes de guardar.");
       return;
     }
-    const home = Number(homeRaw);
-    const away = Number(awayRaw);
+    const parsedScores = predictionInputSchema.safeParse({
+      predictedHomeScore: homeRaw,
+      predictedAwayScore: awayRaw,
+    });
+    if (!parsedScores.success) {
+      await showAlert(firstError(parsedScores.error));
+      return;
+    }
+    const { predictedHomeScore: home, predictedAwayScore: away } = parsedScores.data;
 
     const match = matches.find((m) => m.id === matchId);
     if (!match) return;
 
-    const kickoffMs = match.kickoffTime instanceof Date ? match.kickoffTime.getTime() : (match.kickoffTime as any).toMillis();
-    if (Date.now() >= kickoffMs || match.status === "locked" || match.status === "finished") {
-      alert("¡Este partido ya está cerrado!");
+    const kickoffMs = toMs(match.kickoffTime);
+    if (now >= kickoffMs || match.status === "locked" || match.status === "finished") {
+      await showAlert("¡Este partido ya está cerrado!");
       return;
     }
 
@@ -639,7 +645,7 @@ export default function UnifiedDashboard() {
       setSavedPredictions(prev => ({ ...prev, [`${gid}_${matchId}`]: true }));
     } catch (err) {
       console.error("Error saving prediction:", err);
-      alert("Error al guardar el pronóstico.");
+      await showAlert("Error al guardar el pronóstico.");
     } finally {
       setSavingPrediction(prev => ({ ...prev, [matchId]: false }));
     }
@@ -651,11 +657,13 @@ export default function UnifiedDashboard() {
   // its leaderboard. Throws if the membership write is rejected (e.g. group full),
   // letting callers map the error to their own UI.
   const joinGroupById = async (groupId: string): Promise<Group> => {
+    if (!user) throw new Error("Debes iniciar sesión para unirte a un grupo.");
     await updateDoc(doc(db, "groups", groupId), {
       members: arrayUnion(user.uid),
     });
     const groupSnap = await getDoc(doc(db, "groups", groupId));
-    const joined = { id: groupSnap.id, ...groupSnap.data() } as Group;
+    const joined = parseDoc(groupSchema, groupSnap);
+    if (!joined) throw new Error("No se pudo leer el grupo recién unido.");
     setGroups((prev) => (prev.some((g) => g.id === joined.id) ? prev : [...prev, joined]));
     setSelectedGroup(joined);
     await loadGroupLeaderboard(joined);
@@ -675,7 +683,7 @@ export default function UnifiedDashboard() {
       setPendingInvite(null);
       router.replace("/dashboard"); // drop the ?join= param
       setActiveTab("table");
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error(err);
       setGroupError("No pudimos unirte a este grupo. Es posible que ya esté lleno.");
     } finally {
@@ -711,7 +719,7 @@ export default function UnifiedDashboard() {
       if (pendingInvite?.groupId === groupId) setPendingInvite(null);
       setInviteCode("");
       setActiveTab("table");
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error(err);
       setGroupFormError("Error al unirse al grupo. Por favor, inténtalo de nuevo.");
     } finally {
@@ -726,8 +734,20 @@ export default function UnifiedDashboard() {
     setGroupFormError("");
 
     try {
-      if (firstPlacePercent + secondPlacePercent + thirdPlacePercent !== 100) {
-        setGroupFormError("La distribución de premios debe sumar exactamente 100%.");
+      const rulesParsed = groupRulesInputSchema.safeParse({
+        exactScorePoints, correctOutcomePoints, uniquePredictionPoints,
+        quarterFinalsBonus, semiFinalsBonus, finalsBonus,
+      });
+      const prizeParsed = prizeInputSchema.safeParse({
+        firstPlacePercent, secondPlacePercent, thirdPlacePercent,
+      });
+      if (!rulesParsed.success) {
+        setGroupFormError(firstError(rulesParsed.error));
+        setCreateLoading(false);
+        return;
+      }
+      if (!prizeParsed.success) {
+        setGroupFormError(firstError(prizeParsed.error));
         setCreateLoading(false);
         return;
       }
@@ -762,19 +782,8 @@ export default function UnifiedDashboard() {
         members: [user.uid],
         createdAt: new Date(),
         entryFee: Number(entryFee),
-        rules: {
-          exactScorePoints: Number(exactScorePoints),
-          correctOutcomePoints: Number(correctOutcomePoints),
-          uniquePredictionPoints: Number(uniquePredictionPoints),
-          quarterFinalsBonus: Number(quarterFinalsBonus),
-          semiFinalsBonus: Number(semiFinalsBonus),
-          finalsBonus: Number(finalsBonus),
-        },
-        prizeDistribution: {
-          firstPlacePercent: Number(firstPlacePercent),
-          secondPlacePercent: Number(secondPlacePercent),
-          thirdPlacePercent: Number(thirdPlacePercent),
-        }
+        rules: rulesParsed.data,
+        prizeDistribution: prizeParsed.data,
       };
 
       const groupInvite: Invite = {
@@ -815,7 +824,7 @@ export default function UnifiedDashboard() {
 
       // The detail page owns the "¡Grupo Creado!" success modal + WhatsApp share.
       router.push(`/groups/${groupId}?created=true`);
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error(err);
       setGroupFormError("Error al crear el grupo. Por favor, inténtalo de nuevo.");
     } finally {
@@ -840,19 +849,18 @@ export default function UnifiedDashboard() {
   }
 
   // Calculate stats for home view countdowns
-  const kickoffMsOf = (m: Match) =>
-    m.kickoffTime instanceof Date ? m.kickoffTime.getTime() : (m.kickoffTime as any).toMillis();
+  const kickoffMsOf = (m: Match) => toMs(m.kickoffTime);
 
   // A match is "closed" (no longer predictable) once it has kicked off, locked,
   // or finished. Drives the predictions status filter, the read-only card variant,
   // and the cross-group prefill guard.
   const isMatchClosed = (m: Match) =>
-    Date.now() >= kickoffMsOf(m) || m.status === "locked" || m.status === "finished";
+    now >= kickoffMsOf(m) || m.status === "locked" || m.status === "finished";
 
   const nextMatch = matches.find(m => m.status === "upcoming");
   let countdownText = "";
   if (nextMatch) {
-    const diff = kickoffMsOf(nextMatch) - Date.now();
+    const diff = kickoffMsOf(nextMatch) - now;
     if (diff > 0) {
       const days = Math.floor(diff / (1000 * 60 * 60 * 24));
       const hours = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
@@ -887,7 +895,7 @@ export default function UnifiedDashboard() {
   const startingSoonMatches = matches
     .filter(m => {
       if (m.status !== "upcoming") return false;
-      const diffMin = (kickoffMsOf(m) - Date.now()) / (1000 * 60);
+      const diffMin = (kickoffMsOf(m) - now) / (1000 * 60);
       return diffMin > 0 && diffMin <= SOON_WINDOW_MIN;
     })
     .map(m => ({ match: m, hasPred: currentGroupPreds[m.id] !== undefined }));
@@ -897,7 +905,7 @@ export default function UnifiedDashboard() {
   // "starting soon" so a soon-and-unpredicted match shows a single, urgent card.
   const missingPredictions24h = matches.filter(m => {
     if (m.status !== "upcoming" || startingSoonIds.has(m.id)) return false;
-    const diffHours = (kickoffMsOf(m) - Date.now()) / (1000 * 60 * 60);
+    const diffHours = (kickoffMsOf(m) - now) / (1000 * 60 * 60);
     const hasPred = currentGroupPreds[m.id] !== undefined;
     return diffHours > 0 && diffHours <= 24 && !hasPred;
   });
@@ -1664,7 +1672,7 @@ export default function UnifiedDashboard() {
                       .filter(m => m.displayName.toLowerCase().includes(searchQuery.toLowerCase()))
                       .map((member, index) => {
                         const rank = index + 1;
-                        const isSelf = member.uid === user.uid;
+                        const isSelf = member.uid === user?.uid;
                         
                         let badgeColor = "bg-neutral-800 border-neutral-700 text-gray-400";
                         if (rank === 1) badgeColor = "bg-yellow-500/20 border-yellow-500/30 text-yellow-300";
@@ -2119,7 +2127,7 @@ export default function UnifiedDashboard() {
 
                   {/* Injected client-side "match starting soon" alerts (ephemeral) */}
                   {startingSoonMatches.map(({ match: m, hasPred }) => {
-                    const minsLeft = Math.max(0, Math.round((kickoffMsOf(m) - Date.now()) / (1000 * 60)));
+                    const minsLeft = Math.max(0, Math.round((kickoffMsOf(m) - now) / (1000 * 60)));
                     return (
                       <div
                         key={`soon_${m.id}`}
@@ -2179,7 +2187,7 @@ export default function UnifiedDashboard() {
                     </div>
                   ) : (
                     notifications.map((n) => {
-                      const notifTime = n.timestamp instanceof Date ? n.timestamp : (n.timestamp ? (n.timestamp as any).toMillis?.() || new Date(n.timestamp).getTime() : Date.now());
+                      const notifTime = toMs(n.timestamp) || now;
                       
                       return (
                         <div 

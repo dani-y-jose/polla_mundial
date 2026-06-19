@@ -1,4 +1,5 @@
 import Link from "next/link";
+import Image from "next/image";
 
 export default function Home() {
   return (
@@ -10,10 +11,14 @@ export default function Home() {
         <div className="absolute -bottom-32 left-1/2 w-96 h-96 bg-emerald-600/30 rounded-full mix-blend-screen filter blur-3xl opacity-50 animate-blob animation-delay-4000"></div>
 
         {/* Mascots — crisp foreground banner at the top of the hero */}
-        <img
+        <Image
           src="/mascots.png"
           alt="Mascotas del Mundial 2026"
+          width={1200}
+          height={675}
+          priority
           className="relative z-10 w-full max-w-2xl select-none pointer-events-none drop-shadow-2xl"
+          style={{ height: "auto" }}
         />
 
         <div className="relative z-10 text-center max-w-3xl mx-auto space-y-8">
