@@ -8,7 +8,7 @@ import {
   type Firestore,
 } from "firebase/firestore";
 
-const firebaseConfig = {
+export const firebaseConfig = {
   projectId: "polla-mundial-dj-2026",
   appId: "1:561862734550:web:ceef432aeed370466e8f77",
   storageBucket: "polla-mundial-dj-2026.firebasestorage.app",

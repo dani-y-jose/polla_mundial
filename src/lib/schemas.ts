@@ -25,9 +25,12 @@ import type { Timestamp } from "firebase/firestore";
 const hasToMillis = (v: unknown): v is { toMillis: () => number } =>
   typeof v === "object" && v !== null && typeof (v as { toMillis?: unknown }).toMillis === "function";
 
-export const zTimestamp = z.custom<Date | Timestamp>(
-  (v) => v instanceof Date || hasToMillis(v),
-  { message: "Se esperaba una fecha o Timestamp" }
+// Accepts a JS Date, a Firestore Timestamp, or — for data that crossed an HTTP
+// boundary (e.g. the /api/matches cache) — epoch millis or an ISO string. All
+// shapes are normalized downstream by toMs().
+export const zTimestamp = z.custom<Date | Timestamp | number | string>(
+  (v) => v instanceof Date || typeof v === "number" || typeof v === "string" || hasToMillis(v),
+  { message: "Se esperaba una fecha, Timestamp, epoch o ISO string" }
 );
 
 // Looser variant for notifications, whose timestamp may also arrive as epoch
