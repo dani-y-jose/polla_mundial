@@ -50,7 +50,7 @@ function lazy<T extends object>(resolve: () => T): T {
   return new Proxy({} as T, {
     get(_target, prop) {
       cached ??= (ensureApp(), resolve());
-      const value = (cached as any)[prop];
+      const value = (cached as Record<string | symbol, unknown>)[prop];
       return typeof value === "function" ? value.bind(cached) : value;
     },
   });
