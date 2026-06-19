@@ -101,74 +101,48 @@ export function calculateGroupScores(
     }
   });
 
-  // 2. Stage bonuses: Guessing all qualifiers in a round
-  const roundOf16Matches = finishedMatches.filter(m => m.phase === 'round_of_16');
-  const quarterFinalsMatches = finishedMatches.filter(m => m.phase === 'quarter_finals');
-  const semiFinalsMatches = finishedMatches.filter(m => m.phase === 'semi_finals');
+  // 2. Stage bonuses: correctly predicting the outcome of every match in a
+  // round. Each round only pays out once it has fully finished (the expected
+  // match count is present) and the group enabled that bonus.
+  //   Bono Cuartos     — all 8 Round of 16 outcomes correct
+  //   Bono Semifinales — all 4 Quarter Final outcomes correct
+  //   Bono Final       — both Semifinal outcomes correct
+  awardPhaseBonus(scores, members, groupPredictions,
+    finishedMatches.filter(m => m.phase === 'round_of_16'), 8, rules.quarterFinalsBonus);
+  awardPhaseBonus(scores, members, groupPredictions,
+    finishedMatches.filter(m => m.phase === 'quarter_finals'), 4, rules.semiFinalsBonus);
+  awardPhaseBonus(scores, members, groupPredictions,
+    finishedMatches.filter(m => m.phase === 'semi_finals'), 2, rules.finalsBonus);
+
+  return scores;
+}
+
+/**
+ * Awards a round bonus to every member who predicted the correct outcome of
+ * *all* matches in a phase. No-op unless the bonus is enabled (> 0) and the
+ * whole round has finished (`phaseMatches.length === expectedCount`).
+ * Mutates `scores` in place.
+ */
+function awardPhaseBonus(
+  scores: Record<string, { totalPoints: number; exactGuesses: number }>,
+  members: string[],
+  groupPredictions: Prediction[],
+  phaseMatches: Match[],
+  expectedCount: number,
+  bonusPoints: number
+): void {
+  if (bonusPoints <= 0 || phaseMatches.length !== expectedCount) return;
 
   members.forEach(uid => {
     const userPreds = groupPredictions.filter(p => p.userId === uid);
-
-    // Bono Cuartos: Guess all Round of 16 winners correctly
-    if (rules.quarterFinalsBonus > 0 && roundOf16Matches.length === 8) {
-      let guessedAll = true;
-      roundOf16Matches.forEach(match => {
-        const pred = userPreds.find(p => p.matchId === match.id);
-        if (!pred) {
-          guessedAll = false;
-          return;
-        }
-        const predOutcome = getOutcome(pred.predictedHomeScore, pred.predictedAwayScore);
-        const actualOutcome = getOutcome(match.homeScore!, match.awayScore!);
-        if (predOutcome !== actualOutcome) {
-          guessedAll = false;
-        }
-      });
-      if (guessedAll) {
-        scores[uid].totalPoints += rules.quarterFinalsBonus;
-      }
-    }
-
-    // Bono Semifinales: Guess all Quarter Finals winners correctly
-    if (rules.semiFinalsBonus > 0 && quarterFinalsMatches.length === 4) {
-      let guessedAll = true;
-      quarterFinalsMatches.forEach(match => {
-        const pred = userPreds.find(p => p.matchId === match.id);
-        if (!pred) {
-          guessedAll = false;
-          return;
-        }
-        const predOutcome = getOutcome(pred.predictedHomeScore, pred.predictedAwayScore);
-        const actualOutcome = getOutcome(match.homeScore!, match.awayScore!);
-        if (predOutcome !== actualOutcome) {
-          guessedAll = false;
-        }
-      });
-      if (guessedAll) {
-        scores[uid].totalPoints += rules.semiFinalsBonus;
-      }
-    }
-
-    // Bono Final: Guess all Semifinals winners correctly
-    if (rules.finalsBonus > 0 && semiFinalsMatches.length === 2) {
-      let guessedAll = true;
-      semiFinalsMatches.forEach(match => {
-        const pred = userPreds.find(p => p.matchId === match.id);
-        if (!pred) {
-          guessedAll = false;
-          return;
-        }
-        const predOutcome = getOutcome(pred.predictedHomeScore, pred.predictedAwayScore);
-        const actualOutcome = getOutcome(match.homeScore!, match.awayScore!);
-        if (predOutcome !== actualOutcome) {
-          guessedAll = false;
-        }
-      });
-      if (guessedAll) {
-        scores[uid].totalPoints += rules.finalsBonus;
-      }
+    const guessedAll = phaseMatches.every(match => {
+      const pred = userPreds.find(p => p.matchId === match.id);
+      if (!pred) return false;
+      return getOutcome(pred.predictedHomeScore, pred.predictedAwayScore)
+        === getOutcome(match.homeScore!, match.awayScore!);
+    });
+    if (guessedAll) {
+      scores[uid].totalPoints += bonusPoints;
     }
   });
-
-  return scores;
 }
