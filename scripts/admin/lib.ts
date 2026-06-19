@@ -8,60 +8,65 @@ import type { Match, Prediction } from "../../src/types";
 
 // Firestore (admin) returns Timestamp; the app types use Date. Tolerate both,
 // mirroring the app's `instanceof Date ? .getTime() : .toMillis()` pattern.
-export function toDate(v: any): Date | null {
+const hasToDate = (v: unknown): v is { toDate: () => Date } =>
+  typeof v === "object" && v !== null && typeof (v as { toDate?: unknown }).toDate === "function";
+const hasToMillis = (v: unknown): v is { toMillis: () => number } =>
+  typeof v === "object" && v !== null && typeof (v as { toMillis?: unknown }).toMillis === "function";
+
+export function toDate(v: unknown): Date | null {
   if (v == null) return null;
   if (v instanceof Date) return v;
-  if (typeof v.toDate === "function") return v.toDate();
-  if (typeof v.toMillis === "function") return new Date(v.toMillis());
-  return new Date(v);
+  if (hasToDate(v)) return v.toDate();
+  if (hasToMillis(v)) return new Date(v.toMillis());
+  return new Date(v as string | number);
 }
 
 // ---- Doc mappers (Firestore doc -> app shape) -----------------------------
 
 export function mapMatch(doc: DocumentSnapshot): Match {
-  const d = doc.data() as any;
-  return { ...d, id: doc.id, kickoffTime: toDate(d?.kickoffTime) as Date };
+  const d = (doc.data() ?? {}) as Record<string, unknown>;
+  return { ...d, id: doc.id, kickoffTime: toDate(d.kickoffTime) } as unknown as Match;
 }
 
 export function mapPrediction(doc: DocumentSnapshot): Prediction {
-  const d = doc.data() as any;
-  return { ...d, id: doc.id, timestamp: toDate(d?.timestamp) as Date };
+  const d = (doc.data() ?? {}) as Record<string, unknown>;
+  return { ...d, id: doc.id, timestamp: toDate(d.timestamp) } as unknown as Prediction;
 }
 
 // ---- Output ---------------------------------------------------------------
 
 // Deep-convert Timestamps/Dates to ISO strings so JSON output is readable.
-function serialize(v: any): any {
+function serialize(v: unknown): unknown {
   if (v == null) return v;
   if (v instanceof Date) return v.toISOString();
-  if (typeof v.toDate === "function") return v.toDate().toISOString();
+  if (hasToDate(v)) return v.toDate().toISOString();
   if (Array.isArray(v)) return v.map(serialize);
   if (typeof v === "object") {
-    const out: Record<string, any> = {};
-    for (const k of Object.keys(v)) out[k] = serialize(v[k]);
+    const out: Record<string, unknown> = {};
+    for (const k of Object.keys(v as object)) out[k] = serialize((v as Record<string, unknown>)[k]);
     return out;
   }
   return v;
 }
 
-export function printJson(v: any): void {
+export function printJson(v: unknown): void {
   console.log(JSON.stringify(serialize(v), null, 2));
 }
 
 const MAX_CELL = 48;
 
-function cell(v: any): string {
+function cell(v: unknown): string {
   let s: string;
   if (v == null) s = "";
   else if (v instanceof Date) s = v.toISOString();
-  else if (typeof v?.toDate === "function") s = v.toDate().toISOString();
+  else if (hasToDate(v)) s = v.toDate().toISOString();
   else if (typeof v === "object") s = JSON.stringify(serialize(v));
   else s = String(v);
   return s.length > MAX_CELL ? s.slice(0, MAX_CELL - 1) + "…" : s;
 }
 
 // Print an array of flat-ish objects as an aligned table.
-export function printTable(rows: any[], columns?: string[]): void {
+export function printTable(rows: Array<Record<string, unknown>>, columns?: string[]): void {
   if (!rows.length) {
     console.log("(no rows)");
     return;
@@ -82,7 +87,7 @@ const OPS = new Set<string>([
 ]);
 
 // Coerce a bare token to number/bool/null/JSON, else leave as string.
-function coerce(s: string): any {
+function coerce(s: string): unknown {
   if (s === "null") return null;
   if (s === "true") return true;
   if (s === "false") return false;
@@ -100,7 +105,7 @@ function coerce(s: string): any {
 // Turn `--where "field op value"` strings into [field, op, value] tuples.
 // in / not-in / array-contains-any expect a JSON array value, e.g.
 //   --where "status in [\"locked\",\"finished\"]"
-export function parseWhere(clauses: string[]): Array<[string, WhereFilterOp, any]> {
+export function parseWhere(clauses: string[]): Array<[string, WhereFilterOp, unknown]> {
   return clauses.map((c) => {
     const parts = c.trim().split(/\s+/);
     const field = parts[0];

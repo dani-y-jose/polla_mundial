@@ -38,6 +38,13 @@ service cloud.firestore {
       return request.resource.data.diff(resourceData).affectedKeys();
     }
 
+    // A prediction score must be an integer goal count in [0, 99]. Mirrors the
+    // client-side Zod check in src/lib/form-schemas.ts — enforced here so the
+    // range is authoritative and can't be bypassed via the SDK.
+    function validScore(s) {
+      return s is int && s >= 0 && s <= 99;
+    }
+
     // Global, admin-configurable cap on members per group. Falls back to 100
     // when the /config/app doc has not been created yet. Kept in sync with
     // DEFAULT_MAX_MEMBERS_PER_GROUP in src/lib/config.ts.
@@ -126,6 +133,8 @@ service cloud.firestore {
       allow create: if isSignedIn()
         && request.resource.data.userId == request.auth.uid
         && request.resource.data.pointsEarned == null
+        && validScore(request.resource.data.predictedHomeScore)
+        && validScore(request.resource.data.predictedAwayScore)
         && isGroupMember(request.resource.data.groupId)
         && matchOpen(request.resource.data.matchId);
 
@@ -139,6 +148,8 @@ service cloud.firestore {
         && request.resource.data.groupId == resource.data.groupId
         && request.resource.data.matchId == resource.data.matchId
         && request.resource.data.pointsEarned == resource.data.pointsEarned
+        && validScore(request.resource.data.predictedHomeScore)
+        && validScore(request.resource.data.predictedAwayScore)
         && matchOpen(resource.data.matchId)
       );
 

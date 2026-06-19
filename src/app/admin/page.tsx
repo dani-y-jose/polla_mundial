@@ -5,10 +5,14 @@ import { useRouter } from "next/navigation";
 import { onAuthStateChanged } from "firebase/auth";
 import { auth, db } from "@/lib/firebase";
 import { collection, getDocs, doc, setDoc, getDoc, updateDoc, query, where, writeBatch } from "firebase/firestore";
-import { Match, MatchPhase, ResolutionMethod, User, Prediction } from "@/types";
+import { Match, MatchPhase, ResolutionMethod, User } from "@/types";
+import { matchSchema, userSchema, predictionSchema } from "@/lib/schemas";
+import { parseDoc, parseDocs } from "@/lib/parse";
+import { maxMembersInputSchema, matchInputSchema, firstError } from "@/lib/form-schemas";
 import { calculatePoints } from "@/lib/scoring";
 import { getMaxMembersPerGroup, DEFAULT_MAX_MEMBERS_PER_GROUP } from "@/lib/config";
-import { formatKickoffDateTime } from "@/lib/dates";
+import { formatKickoffDateTime, toMs } from "@/lib/dates";
+import { useDialog } from "@/components/DialogProvider";
 
 const PHASE_TRANSLATIONS: Record<string, string> = {
   group: "Fase de Grupos",
@@ -53,6 +57,7 @@ export default function AdminPage() {
   const [refereeCountry, setRefereeCountry] = useState("");
 
   const router = useRouter();
+  const { alert: showAlert, confirm: showConfirm } = useDialog();
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
@@ -63,12 +68,8 @@ export default function AdminPage() {
       
       try {
         const userDoc = await getDoc(doc(db, "users", currentUser.uid));
-        if (userDoc.exists()) {
-          const u = userDoc.data() as User;
-          if (!u.isAdmin) {
-            router.push("/dashboard");
-            return;
-          }
+        const u = parseDoc(userSchema, userDoc);
+        if (u && u.isAdmin) {
           setUser(u);
         } else {
           router.push("/dashboard");
@@ -77,14 +78,11 @@ export default function AdminPage() {
 
         // Fetch Matches
         const matchesSnapshot = await getDocs(collection(db, "matches"));
-        const matchesData: Match[] = [];
-        matchesSnapshot.forEach((doc) => {
-          matchesData.push({ id: doc.id, ...doc.data() } as Match);
-        });
+        const matchesData = parseDocs(matchSchema, matchesSnapshot);
         
         matchesData.sort((a, b) => {
-          const timeA = a.kickoffTime instanceof Date ? a.kickoffTime.getTime() : (a.kickoffTime as any).toMillis();
-          const timeB = b.kickoffTime instanceof Date ? b.kickoffTime.getTime() : (b.kickoffTime as any).toMillis();
+          const timeA = toMs(a.kickoffTime);
+          const timeB = toMs(b.kickoffTime);
           return timeB - timeA; // Descending
         });
         setMatches(matchesData);
@@ -114,8 +112,8 @@ export default function AdminPage() {
 
       for (let i = 0; i < updatedMatches.length; i++) {
         const m = updatedMatches[i];
-        const kickoffMs = m.kickoffTime instanceof Date ? m.kickoffTime.getTime() : (m.kickoffTime as any).toMillis();
-        
+        const kickoffMs = toMs(m.kickoffTime);
+
         if (m.status === "upcoming" && now >= kickoffMs) {
           try {
             const mRef = doc(db, "matches", m.id);
@@ -139,11 +137,12 @@ export default function AdminPage() {
 
   // Persist the global, admin-only member cap.
   const handleSaveMaxMembers = async () => {
-    const value = parseInt(maxMembersInput, 10);
-    if (!value || value < 1) {
-      alert("El máximo de miembros por grupo debe ser al menos 1.");
+    const parsed = maxMembersInputSchema.safeParse(maxMembersInput);
+    if (!parsed.success) {
+      await showAlert(firstError(parsed.error));
       return;
     }
+    const value = parsed.data;
     setConfigLoading(true);
     try {
       await setDoc(doc(db, "config", "app"), { maxMembersPerGroup: value }, { merge: true });
@@ -152,7 +151,7 @@ export default function AdminPage() {
       setTimeout(() => setConfigSaved(false), 3000);
     } catch (err) {
       console.error(err);
-      alert("Error al guardar la configuración.");
+      await showAlert("Error al guardar la configuración.");
     } finally {
       setConfigLoading(false);
     }
@@ -160,14 +159,19 @@ export default function AdminPage() {
 
   const handleCreateMatch = async (e: React.FormEvent) => {
     e.preventDefault();
+    const parsed = matchInputSchema.safeParse({ homeTeam, awayTeam, kickoffTime });
+    if (!parsed.success) {
+      await showAlert(firstError(parsed.error));
+      return;
+    }
     setCreateLoading(true);
     try {
       const matchId = `match_${Date.now()}`;
       const payload: Match = {
         id: matchId,
-        homeTeam,
-        awayTeam,
-        kickoffTime: new Date(kickoffTime),
+        homeTeam: parsed.data.homeTeam,
+        awayTeam: parsed.data.awayTeam,
+        kickoffTime: new Date(parsed.data.kickoffTime),
         status: "upcoming",
         homeScore: null,
         awayScore: null,
@@ -187,7 +191,7 @@ export default function AdminPage() {
       setTimeout(() => setMatchCreated(false), 3000);
     } catch (err) {
       console.error(err);
-      alert("Error al crear el partido.");
+      await showAlert("Error al crear el partido.");
     } finally {
       setCreateLoading(false);
     }
@@ -218,7 +222,8 @@ export default function AdminPage() {
 
       const batch = writeBatch(db);
       predsSnapshot.forEach((predDoc) => {
-        const predData = predDoc.data() as Prediction;
+        const predData = parseDoc(predictionSchema, predDoc);
+        if (!predData) return;
         const points = calculatePoints(predData.predictedHomeScore, predData.predictedAwayScore, hScore, aScore);
 
         const pRef = doc(db, "predictions", predDoc.id);
@@ -232,11 +237,11 @@ export default function AdminPage() {
       // write above and notifies exactly the users who predicted this match.
 
       setMatches(matches.map(m => m.id === matchId ? { ...m, homeScore: hScore, awayScore: aScore, status: "finished", resolutionMethod } : m));
-      alert("¡Marcador actualizado y puntos recalculados!");
+      await showAlert("¡Marcador actualizado y puntos recalculados!");
 
     } catch (err) {
       console.error(err);
-      alert("Error al actualizar el marcador.");
+      await showAlert("Error al actualizar el marcador.");
     }
   };
 
@@ -250,8 +255,9 @@ export default function AdminPage() {
       // Fetch first so the confirmation can state the blast radius.
       const q = query(collection(db, "predictions"), where("matchId", "==", match.id));
       const predsSnapshot = await getDocs(q);
-      const ok = confirm(
-        `¿Eliminar "${match.homeTeam} vs ${match.awayTeam}" y sus ${predsSnapshot.size} pronóstico(s)? Esta acción no se puede deshacer.`
+      const ok = await showConfirm(
+        `¿Eliminar "${match.homeTeam} vs ${match.awayTeam}" y sus ${predsSnapshot.size} pronóstico(s)? Esta acción no se puede deshacer.`,
+        { title: "Eliminar partido", confirmText: "Eliminar", tone: "danger" }
       );
       if (!ok) return;
 
@@ -272,10 +278,10 @@ export default function AdminPage() {
       await batch.commit();
 
       setMatches(prev => prev.filter(m => m.id !== match.id));
-      alert(`✓ Partido eliminado junto con ${predsSnapshot.size} pronóstico(s).`);
+      await showAlert(`✓ Partido eliminado junto con ${predsSnapshot.size} pronóstico(s).`);
     } catch (err) {
       console.error(err);
-      alert("Error al eliminar el partido.");
+      await showAlert("Error al eliminar el partido.");
     } finally {
       setDeletingId(null);
     }
@@ -388,7 +394,7 @@ export default function AdminPage() {
                 <div className="flex-1">
                   <div className="text-sm text-emerald-400">{(PHASE_TRANSLATIONS[match.phase] || match.phase).toUpperCase()}</div>
                   <div className="text-lg font-bold">{match.homeTeam} vs {match.awayTeam}</div>
-                  <div className="text-sm text-gray-400">{formatKickoffDateTime(match.kickoffTime as any)}</div>
+                  <div className="text-sm text-gray-400">{formatKickoffDateTime(match.kickoffTime)}</div>
                 </div>
                 
                 {match.status !== 'finished' ? (

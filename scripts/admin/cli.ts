@@ -9,7 +9,8 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { parseArgs } from "node:util";
 import type { Query, QueryDocumentSnapshot, WriteBatch } from "firebase-admin/firestore";
 import { calculateGroupScores, calculatePoints } from "../../src/lib/scoring";
-import type { GroupRules, Match, MatchPhase, ResolutionMethod } from "../../src/types";
+import { toMs } from "../../src/lib/dates";
+import type { Group, GroupRules, Match, MatchPhase, ResolutionMethod } from "../../src/types";
 import { auth, db, FieldValue } from "./firebase";
 import { confirm, mapMatch, mapPrediction, parseWhere, printJson, printTable } from "./lib";
 import { WC2026_GROUP_MATCHES } from "./wc2026";
@@ -142,7 +143,7 @@ async function resolveUserIdentity(idOrEmail: string): Promise<{
       const d = snap.docs[0];
       uid = d.id;
       docExists = true;
-      const data = d.data() as any;
+      const data = d.data() as { email?: string; isAdmin?: boolean };
       email = data.email ?? email;
       isAdmin = !!data.isAdmin;
     }
@@ -150,7 +151,7 @@ async function resolveUserIdentity(idOrEmail: string): Promise<{
     const doc = await db.collection("users").doc(idOrEmail).get();
     docExists = doc.exists;
     if (doc.exists) {
-      const data = doc.data() as any;
+      const data = doc.data() as { email?: string; isAdmin?: boolean };
       email = data.email ?? null;
       isAdmin = !!data.isAdmin;
     }
@@ -163,8 +164,8 @@ async function resolveUserIdentity(idOrEmail: string): Promise<{
     uid ??= rec.uid;
     email ??= rec.email ?? null;
     authExists = true;
-  } catch (e: any) {
-    if (e?.code !== "auth/user-not-found") throw e; // surface real errors
+  } catch (e: unknown) {
+    if ((e as { code?: string })?.code !== "auth/user-not-found") throw e; // surface real errors
   }
 
   return { uid, email, isAdmin, docExists, authExists };
@@ -209,7 +210,8 @@ async function main() {
       q = q.limit(values.limit ? Number(values.limit) : 50);
       const snap = await q.get();
       const rows = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-      values.json ? printJson(rows) : printTable(rows);
+      if (values.json) printJson(rows);
+      else printTable(rows);
       break;
     }
 
@@ -260,7 +262,7 @@ async function main() {
       for (const m of matches) byStatus[m.status] = (byStatus[m.status] ?? 0) + 1;
       const next = matches
         .filter((m) => m.status !== "finished" && m.kickoffTime)
-        .sort((a, b) => a.kickoffTime!.getTime() - b.kickoffTime!.getTime())[0];
+        .sort((a, b) => toMs(a.kickoffTime) - toMs(b.kickoffTime))[0];
       const nextKickoff = next
         ? { id: next.id, match: `${next.homeTeam} v ${next.awayTeam}`, kickoff: next.kickoffTime }
         : null;
@@ -273,7 +275,7 @@ async function main() {
           `\nmatches: ${byStatus.upcoming} upcoming, ${byStatus.locked} locked, ${byStatus.finished} finished`,
         );
         if (next) {
-          console.log(`next kickoff: ${nextKickoff!.match} @ ${next.kickoffTime?.toISOString()} (${next.id})`);
+          console.log(`next kickoff: ${nextKickoff!.match} @ ${new Date(toMs(next.kickoffTime)).toISOString()} (${next.id})`);
         }
       }
       break;
@@ -284,7 +286,7 @@ async function main() {
       const groupId = req(args[0], "groupId");
       const groupDoc = await db.collection("groups").doc(groupId).get();
       if (!groupDoc.exists) throw new Error(`group ${groupId} not found`);
-      const group = groupDoc.data() as any;
+      const group = groupDoc.data() as Partial<Group>;
       const members: string[] = group.members ?? [];
       const rules: GroupRules = group.rules ?? DEFAULT_RULES;
 
@@ -300,7 +302,7 @@ async function main() {
       const userDocs = members.length
         ? await db.getAll(...members.map((m) => db.collection("users").doc(m)))
         : [];
-      const names = new Map(userDocs.map((d) => [d.id, (d.data() as any)?.displayName ?? "(unknown)"]));
+      const names = new Map(userDocs.map((d) => [d.id, (d.data() as { displayName?: string } | undefined)?.displayName ?? "(unknown)"]));
 
       const rows = members
         .map((uid) => ({
@@ -325,8 +327,8 @@ async function main() {
       const snap = await db.collection("groups").get();
       const rows = snap.docs
         .map((d) => {
-          const g = d.data() as any;
-          const r = g.rules as GroupRules | undefined;
+          const g = d.data() as Partial<Group>;
+          const r = g.rules;
           const rulesSummary = r
             ? `${r.exactScorePoints}/${r.correctOutcomePoints}` +
               (r.uniquePredictionPoints ? ` +uniq${r.uniquePredictionPoints}` : "") +
@@ -344,7 +346,8 @@ async function main() {
           };
         })
         .sort((a, b) => a.name.localeCompare(b.name));
-      values.json ? printJson(rows) : printTable(rows);
+      if (values.json) printJson(rows);
+      else printTable(rows);
       break;
     }
 
@@ -354,7 +357,7 @@ async function main() {
       const snap = await q.get();
       const rows = snap.docs
         .map(mapMatch)
-        .sort((a, b) => (a.kickoffTime?.getTime() ?? 0) - (b.kickoffTime?.getTime() ?? 0))
+        .sort((a, b) => toMs(a.kickoffTime) - toMs(b.kickoffTime))
         .map((m) => ({
           id: m.id,
           phase: m.phase,
@@ -363,7 +366,8 @@ async function main() {
           status: m.status,
           score: m.homeScore == null ? "" : `${m.homeScore}-${m.awayScore}`,
         }));
-      values.json ? printJson(rows) : printTable(rows);
+      if (values.json) printJson(rows);
+      else printTable(rows);
       break;
     }
 
@@ -405,7 +409,7 @@ async function main() {
       const matchDoc = await matchRef.get();
       const preds = await db.collection("predictions").where("matchId", "==", matchId).get();
 
-      const m = matchDoc.data() as any;
+      const m = matchDoc.data() as Partial<Match>;
       const label = matchDoc.exists ? `${m.homeTeam} v ${m.awayTeam}` : "(match doc missing)";
       console.log(
         `${matchId}  ${label}\n` +
@@ -480,14 +484,14 @@ async function main() {
       const away = Number(req(args[2], "away"));
       if (Number.isNaN(home) || Number.isNaN(away)) throw new Error("home/away must be numbers");
       const resolution = (values.resolution ?? "normal") as ResolutionMethod;
-      if (resolution && !RESOLUTIONS.includes(resolution as any)) {
+      if (resolution && !RESOLUTIONS.includes(resolution)) {
         throw new Error(`--resolution must be one of: ${RESOLUTIONS.join(", ")}`);
       }
 
       const matchRef = db.collection("matches").doc(matchId);
       const matchDoc = await matchRef.get();
       if (!matchDoc.exists) throw new Error(`match ${matchId} not found`);
-      const match = matchDoc.data() as any;
+      const match = matchDoc.data() as Partial<Match>;
 
       const predsSnap = await db.collection("predictions").where("matchId", "==", matchId).get();
       const affectedUsers = new Set(predsSnap.docs.map((d) => d.data().userId as string));
@@ -551,7 +555,8 @@ async function main() {
       const value = req(args[0], field);
       const snap = await db.collection("predictions").where(field, "==", value).get();
       const rows = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-      values.json ? printJson(rows) : printTable(rows);
+      if (values.json) printJson(rows);
+      else printTable(rows);
       break;
     }
 
@@ -559,7 +564,7 @@ async function main() {
     case "users:revoke-admin": {
       const grant = command === "users:make-admin";
       const ref = await resolveUserRef(req(args[0], "email|uid"));
-      const who = (await ref.get()).data() as any;
+      const who = (await ref.get()).data() as { email?: string } | undefined;
       if (!(await confirm(`${grant ? "Grant" : "Revoke"} admin for ${who?.email ?? ref.id}?`, values.yes))) return;
       await ref.update({ isAdmin: grant });
       console.log(`✓ isAdmin=${grant} for ${who?.email ?? ref.id}`);
@@ -596,7 +601,7 @@ async function main() {
         memberGroups = g.docs;
         consumedInvites = inv.docs;
       }
-      const createdGroups = memberGroups.filter((d) => (d.data() as any).creatorId === uid);
+      const createdGroups = memberGroups.filter((d) => (d.data() as { creatorId?: string }).creatorId === uid);
 
       console.log(
         `Delete user ${who}  (uid=${uid}${isAdmin ? ", ADMIN" : ""})\n` +
@@ -625,7 +630,7 @@ async function main() {
           writes.push((b) => b.update(d.ref, { members: FieldValue.arrayRemove(uid) }));
         }
         for (const d of consumedInvites) {
-          const uses = Math.max(0, ((d.data() as any).uses ?? 1) - 1);
+          const uses = Math.max(0, ((d.data() as { uses?: number }).uses ?? 1) - 1);
           writes.push((b) => b.update(d.ref, { consumedBy: FieldValue.arrayRemove(uid), uses }));
         }
         if (docExists) writes.push((b) => b.delete(db.collection("users").doc(uid)));
@@ -651,7 +656,8 @@ async function main() {
     case "invites:list": {
       const snap = await db.collection("invites").get();
       const rows = snap.docs.map((d) => ({ code: d.id, ...d.data() }));
-      values.json ? printJson(rows) : printTable(rows);
+      if (values.json) printJson(rows);
+      else printTable(rows);
       break;
     }
 
