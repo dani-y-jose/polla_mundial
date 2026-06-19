@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { onAuthStateChanged, type User as FirebaseUser } from "firebase/auth";
 import { auth, db } from "@/lib/firebase";
@@ -23,6 +23,7 @@ import { Match, Prediction, User, Group, Invite } from "@/types";
 import type { Notification as AppNotification } from "@/types";
 import { matchSchema, predictionSchema, userSchema, groupSchema, championSchema, notificationSchema } from "@/lib/schemas";
 import { parseDoc, parseDocs } from "@/lib/parse";
+import { getMatches } from "@/lib/matches";
 import { predictionInputSchema, prizeInputSchema, groupRulesInputSchema, firstError } from "@/lib/form-schemas";
 import { calculateGroupScores } from "@/lib/scoring";
 import { getFlag, WORLD_CUP_TEAMS } from "@/lib/flags";
@@ -32,6 +33,15 @@ import { enablePushNotifications, pushIsSupported } from "@/lib/messaging";
 import { useDialog } from "@/components/DialogProvider";
 
 type Tab = "home" | "predictions" | "table" | "groups" | "profile";
+
+// The expensive, cacheable inputs to a group's leaderboard. Scores are always
+// recomputed from the *current* matches, so this caches only the reads (member
+// profiles + the group's predictions + champion picks).
+type GroupLeaderboardRaw = {
+  members: User[];
+  predictions: Prediction[];
+  champions: Record<string, string>;
+};
 
 const PHASE_TRANSLATIONS: Record<string, string> = {
   group: "Fase de Grupos",
@@ -101,6 +111,9 @@ export default function UnifiedDashboard() {
 
   // Form/Local States
   const [loading, setLoading] = useState(true);
+  // Surfaced by a watchdog when the initial load stalls, so the user gets a
+  // retry instead of an infinite spinner.
+  const [loadError, setLoadError] = useState(false);
   const [savingPrediction, setSavingPrediction] = useState<Record<string, boolean>>({});
   // Tracks which predictions are persisted and unmodified, keyed `${groupId}_${matchId}`.
   // true = saved exactly as shown; false/absent = unsaved edits. Drives the
@@ -145,6 +158,12 @@ export default function UnifiedDashboard() {
   // Champion pick per member for the currently selected group (uid -> team),
   // used by the leaderboard. Loaded alongside the group's leaderboard.
   const [memberChampions, setMemberChampions] = useState<Record<string, string>>({});
+  // Per-group leaderboard cache (raw reads), for instant re-display on switch.
+  // Always revalidated in the background; dropped when the user edits a pick.
+  const leaderboardCacheRef = useRef<Record<string, GroupLeaderboardRaw>>({});
+  // Mirrors the selected group id so a slow background revalidation never
+  // overwrites the table after the user has already switched away.
+  const selectedGroupIdRef = useRef<string | null>(null);
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [showNotifDrawer, setShowNotifDrawer] = useState(false);
   // Web-push enrollment state for this device, surfaced in the profile tab.
@@ -169,6 +188,11 @@ export default function UnifiedDashboard() {
     const id = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(id);
   }, []);
+
+  // Keep the selected-group ref in sync (used to guard background revalidations).
+  useEffect(() => {
+    selectedGroupIdRef.current = selectedGroup?.id ?? null;
+  }, [selectedGroup]);
 
   // Auto-Lock Scheduler for User Dashboard
   useEffect(() => {
@@ -265,75 +289,49 @@ export default function UnifiedDashboard() {
   async function loadAllData(uid: string) {
     try {
       setLoading(true);
+      setLoadError(false);
 
-      // 1. Fetch User profile document
-      const userDoc = await getDoc(doc(db, "users", uid));
+      // Fire every independent read at once. None depends on another, so a
+      // single Promise.all collapses ~6 serial round-trips into one — critical
+      // on slow transports (long-polling makes many ~190ms polls per query, so
+      // serial reads stacked up to 15s+). The leaderboard and invite resolution
+      // are deferred below so they never block the initial render.
+      const [userDoc, groupSnapshot, cap, matchesData, predsSnapshot, champsSnapshot] =
+        await Promise.all([
+          getDoc(doc(db, "users", uid)),
+          getDocs(query(collection(db, "groups"), where("members", "array-contains", uid))),
+          getMaxMembersPerGroup(),
+          getMatches(),
+          getDocs(query(collection(db, "predictions"), where("userId", "==", uid))),
+          getDocs(query(collection(db, "champions"), where("userId", "==", uid))),
+        ]);
+
+      // User profile
       const userData = parseDoc(userSchema, userDoc);
       if (userData) setDbUser(userData);
 
-      // 2. Fetch User's Groups
-      const groupQuery = query(collection(db, "groups"), where("members", "array-contains", uid));
-      const groupSnapshot = await getDocs(groupQuery);
+      // Groups + global member cap
       const groupsData = parseDocs(groupSchema, groupSnapshot);
       setGroups(groupsData);
+      setMaxMembers(cap);
 
-      // Global member cap (admin-configurable), for capacity display + invite maxUses.
-      setMaxMembers(await getMaxMembersPerGroup());
-
-      // 2b. Resolve a pending group invite to confirm joining. A ?join=CODE in
-      // the URL (link followed while signed in / right after sign-up) wins;
-      // otherwise fall back to the code that admitted this account. Only offered
-      // when it points at a group the user isn't already a member of.
-      const joinCode =
-        new URLSearchParams(window.location.search).get("join")?.trim() ||
-        (userData?.inviteId as string | undefined) ||
-        null;
-      if (joinCode) {
-        try {
-          const invSnap = await getDoc(doc(db, "invites", joinCode));
-          if (invSnap.exists()) {
-            const inv = invSnap.data();
-            const gid = (inv.groupId as string | null) ?? null;
-            if (gid && !groupsData.some((g) => g.id === gid)) {
-              setPendingInvite({ code: joinCode, groupId: gid, groupName: (inv.groupName as string) || "tu grupo" });
-            }
-          }
-        } catch (e) {
-          console.error("Error resolving pending invite:", e);
-        }
-      }
-
-      // 3. Fetch Matches (must happen before computing the leaderboard, which
-      // depends on the finished matches to award points).
-      const matchesSnapshot = await getDocs(collection(db, "matches"));
-      const matchesData = parseDocs(matchSchema, matchesSnapshot);
-      matchesData.sort((a, b) => {
-        const timeA = toMs(a.kickoffTime);
-        const timeB = toMs(b.kickoffTime);
-        return timeA - timeB;
-      });
+      // Matches (from the cached /api/matches endpoint), sorted by kickoff.
+      matchesData.sort((a, b) => toMs(a.kickoffTime) - toMs(b.kickoffTime));
       setMatches(matchesData);
 
-      // 4. Fetch all of this user's predictions across their groups, keyed
-      // [groupId][matchId]. Used to scope the predictions tab to the selected
-      // group, and to prefill from another group when entering a new one.
-      const predsQuery = query(collection(db, "predictions"), where("userId", "==", uid));
-      const predsSnapshot = await getDocs(predsQuery);
+      // This user's predictions, keyed [groupId][matchId].
       const byGroup: Record<string, Record<string, Prediction>> = {};
       const savedSeed: Record<string, boolean> = {};
       predsSnapshot.forEach((doc) => {
         const data = parseDoc(predictionSchema, doc);
         if (!data || !data.groupId) return; // ignore malformed / legacy global predictions
         (byGroup[data.groupId] ??= {})[data.matchId] = data;
-        // Everything loaded from Firestore is, by definition, already saved.
         savedSeed[`${data.groupId}_${data.matchId}`] = true;
       });
       setPredictionsByGroup(byGroup);
       setSavedPredictions(savedSeed);
 
-      // 5. Fetch this user's champion picks across their groups (groupId -> team).
-      const champsQuery = query(collection(db, "champions"), where("userId", "==", uid));
-      const champsSnapshot = await getDocs(champsQuery);
+      // This user's champion picks (groupId -> team).
       const champByGroup: Record<string, string> = {};
       champsSnapshot.forEach((doc) => {
         const c = parseDoc(championSchema, doc);
@@ -342,13 +340,34 @@ export default function UnifiedDashboard() {
       setChampionsByGroup(champByGroup);
 
       if (groupsData.length > 0) {
-        // Default to first group. Pass the freshly-fetched matches explicitly,
-        // since the `matches` state set above is not yet visible in this closure.
         const first = groupsData[0];
         setSelectedGroup(first);
         setSelectedChampion(champByGroup[first.id] || "");
         setChampionSaved(!!champByGroup[first.id]);
-        await loadGroupLeaderboard(first, matchesData);
+        // Lazy: the leaderboard needs extra reads (members + per-group preds/
+        // champions). Don't block the initial render on them — the dashboard
+        // shows now and the table fills in a moment later.
+        void loadGroupLeaderboard(first, matchesData);
+      }
+
+      // Resolve a pending group invite (?join=CODE wins, else the admitting
+      // invite). Fire-and-forget: it only drives the optional "join this group?"
+      // card, so it must not delay the dashboard.
+      const joinCode =
+        new URLSearchParams(window.location.search).get("join")?.trim() ||
+        (userData?.inviteId as string | undefined) ||
+        null;
+      if (joinCode) {
+        getDoc(doc(db, "invites", joinCode))
+          .then((invSnap) => {
+            if (!invSnap.exists()) return;
+            const inv = invSnap.data();
+            const gid = (inv.groupId as string | null) ?? null;
+            if (gid && !groupsData.some((g) => g.id === gid)) {
+              setPendingInvite({ code: joinCode, groupId: gid, groupName: (inv.groupName as string) || "tu grupo" });
+            }
+          })
+          .catch((e) => console.error("Error resolving pending invite:", e));
       }
 
     } catch (err) {
@@ -391,63 +410,89 @@ export default function UnifiedDashboard() {
       unsubscribeAuth();
       if (unsubscribeNotifs) unsubscribeNotifs();
     };
-    // Mount-once auth listener; loadAllData is a stable hoisted function and
-    // intentionally not a dependency (adding it would re-subscribe every render).
+    // Mount-once auth listener: subscribe exactly once so re-renders (e.g. the
+    // `now` ticking clock) never tear down and re-create the listener + the
+    // notifications onSnapshot. `router` and loadAllData are captured once.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [router]);
+  }, []);
 
-  // Load member profiles for leaderboard
+  // Watchdog: if the initial load hasn't finished after 15s, stop the spinner
+  // and offer a retry instead of hanging forever.
+  useEffect(() => {
+    if (!loading) return;
+    const t = setTimeout(() => {
+      console.warn("[dashboard] la carga inicial superó 15s — posible read de Firestore colgado");
+      setLoadError(true);
+    }, 15000);
+    return () => clearTimeout(t);
+  }, [loading]);
+
+  // Fetch a group's leaderboard inputs. All reads run in PARALLEL (member chunks
+  // + predictions + champions) — they were serial before, which stacked up on
+  // big groups. The result is cached for instant re-display on switch.
+  async function fetchGroupLeaderboardRaw(group: Group): Promise<GroupLeaderboardRaw> {
+    const chunks: string[][] = [];
+    for (let i = 0; i < group.members.length; i += 10) {
+      chunks.push(group.members.slice(i, i + 10));
+    }
+
+    const [memberSnaps, pSnapshot, cSnapshot] = await Promise.all([
+      Promise.all(
+        chunks.map((chunk) => getDocs(query(collection(db, "users"), where("uid", "in", chunk)))),
+      ),
+      getDocs(query(collection(db, "predictions"), where("groupId", "==", group.id))),
+      getDocs(query(collection(db, "champions"), where("groupId", "==", group.id))),
+    ]);
+
+    const members = memberSnaps.flatMap((s) => parseDocs(userSchema, s));
+    const predictions = parseDocs(predictionSchema, pSnapshot);
+    const champions: Record<string, string> = {};
+    cSnapshot.forEach((doc) => {
+      const c = parseDoc(championSchema, doc);
+      if (c && c.userId && c.champion) champions[c.userId] = c.champion;
+    });
+
+    const raw: GroupLeaderboardRaw = { members, predictions, champions };
+    leaderboardCacheRef.current[group.id] = raw;
+    return raw;
+  }
+
+  // Compute the standings from raw inputs + the CURRENT matches and push to
+  // state. Pure/synchronous — scores never come from the cache, only the reads
+  // do, so a fresh result reflects as soon as `matches` updates.
+  function applyGroupLeaderboard(group: Group, raw: GroupLeaderboardRaw, matchesList?: Match[]) {
+    setMemberChampions(raw.champions);
+
+    const defaultRules = {
+      exactScorePoints: 3,
+      correctOutcomePoints: 1,
+      uniquePredictionPoints: 0,
+      quarterFinalsBonus: 0,
+      semiFinalsBonus: 0,
+      finalsBonus: 0,
+    };
+    const activeRules = group.rules || defaultRules;
+    // Use freshly-fetched matches when provided (during initial load the `matches`
+    // state is still empty here), otherwise fall back to the current state.
+    const matchesForScoring = matchesList ?? matches;
+    const calculatedScores = calculateGroupScores(group.id, group.members, matchesForScoring, raw.predictions, activeRules);
+    setGroupScores(calculatedScores);
+
+    // Sort by dynamic group-specific totalPoints desc, then exactGuesses desc
+    const sorted = [...raw.members].sort((a, b) => {
+      const scoreA = calculatedScores[a.uid] || { totalPoints: 0, exactGuesses: 0 };
+      const scoreB = calculatedScores[b.uid] || { totalPoints: 0, exactGuesses: 0 };
+      if (scoreB.totalPoints !== scoreA.totalPoints) return scoreB.totalPoints - scoreA.totalPoints;
+      return scoreB.exactGuesses - scoreA.exactGuesses;
+    });
+    setGroupMembers(sorted);
+  }
+
+  // Fetch + apply (used on initial load).
   async function loadGroupLeaderboard(group: Group, matchesList?: Match[]) {
     try {
-      const membersData: User[] = [];
-      // Fetch members in chunks of 10 (Firestore limitations)
-      for (let i = 0; i < group.members.length; i += 10) {
-        const chunk = group.members.slice(i, i + 10);
-        const uQuery = query(collection(db, "users"), where("uid", "in", chunk));
-        const uSnapshot = await getDocs(uQuery);
-        membersData.push(...parseDocs(userSchema, uSnapshot));
-      }
-
-      // Fetch this group's predictions in one query (predictions are scoped by
-      // groupId now, so no need to chunk by member).
-      const pQuery = query(collection(db, "predictions"), where("groupId", "==", group.id));
-      const pSnapshot = await getDocs(pQuery);
-      const predsData = parseDocs(predictionSchema, pSnapshot);
-
-      // Fetch this group's champion picks (uid -> team) for display.
-      const champMap: Record<string, string> = {};
-      const cQuery = query(collection(db, "champions"), where("groupId", "==", group.id));
-      const cSnapshot = await getDocs(cQuery);
-      cSnapshot.forEach((doc) => {
-        const c = parseDoc(championSchema, doc);
-        if (c && c.userId && c.champion) champMap[c.userId] = c.champion;
-      });
-      setMemberChampions(champMap);
-
-      // Default Group scoring rules
-      const defaultRules = {
-        exactScorePoints: 3,
-        correctOutcomePoints: 1,
-        uniquePredictionPoints: 0,
-        quarterFinalsBonus: 0,
-        semiFinalsBonus: 0,
-        finalsBonus: 0
-      };
-      const activeRules = group.rules || defaultRules;
-      // Use freshly-fetched matches when provided (during initial load the `matches`
-      // state is still empty here), otherwise fall back to the current state.
-      const matchesForScoring = matchesList ?? matches;
-      const calculatedScores = calculateGroupScores(group.id, group.members, matchesForScoring, predsData, activeRules);
-      setGroupScores(calculatedScores);
-
-      // Sort by dynamic group-specific totalPoints desc, then exactGuesses desc
-      membersData.sort((a, b) => {
-        const scoreA = calculatedScores[a.uid] || { totalPoints: 0, exactGuesses: 0 };
-        const scoreB = calculatedScores[b.uid] || { totalPoints: 0, exactGuesses: 0 };
-        if (scoreB.totalPoints !== scoreA.totalPoints) return scoreB.totalPoints - scoreA.totalPoints;
-        return scoreB.exactGuesses - scoreA.exactGuesses;
-      });
-      setGroupMembers(membersData);
+      const raw = await fetchGroupLeaderboardRaw(group);
+      applyGroupLeaderboard(group, raw, matchesList);
     } catch (err) {
       console.error("Error loading leaderboard:", err);
     }
@@ -455,14 +500,58 @@ export default function UnifiedDashboard() {
 
   const handleGroupChange = async (groupId: string) => {
     const selected = groups.find(g => g.id === groupId);
-    if (selected) {
-      setSelectedGroup(selected);
-      // Champion is per-group: reflect the pick saved for this group.
-      setSelectedChampion(championsByGroup[selected.id] || "");
-      setChampionSaved(!!championsByGroup[selected.id]);
+    if (!selected) return;
+    setSelectedGroup(selected);
+    selectedGroupIdRef.current = selected.id;
+    // Champion is per-group: reflect the pick saved for this group.
+    setSelectedChampion(championsByGroup[selected.id] || "");
+    setChampionSaved(!!championsByGroup[selected.id]);
+
+    const cached = leaderboardCacheRef.current[selected.id];
+    if (cached) {
+      // Show the cached standings instantly (no spinner)…
+      applyGroupLeaderboard(selected, cached);
+      // …then revalidate in the background so others' predictions and fresh
+      // results update without making the user wait. Guarded so a slow response
+      // never overwrites the table after the user switched away again.
+      fetchGroupLeaderboardRaw(selected)
+        .then((raw) => {
+          if (selectedGroupIdRef.current === selected.id) applyGroupLeaderboard(selected, raw);
+        })
+        .catch((err) => console.error("Error revalidating leaderboard:", err));
+    } else {
       await loadGroupLeaderboard(selected);
     }
   };
+
+  // Live match results: a score entered by an admin propagates here immediately
+  // (real-time, no polling, no reload). The initial paint still comes from the
+  // cached /api/matches; this keeps the list live afterwards. With
+  // persistentLocalCache the first emission is served from IndexedDB instantly.
+  useEffect(() => {
+    if (!user) return;
+    const unsub = onSnapshot(
+      collection(db, "matches"),
+      (snap) => {
+        const live = parseDocs(matchSchema, snap);
+        live.sort((a, b) => toMs(a.kickoffTime) - toMs(b.kickoffTime));
+        setMatches(live);
+      },
+      (err) => console.error("Error listening to matches:", err),
+    );
+    return () => unsub();
+  }, [user]);
+
+  // Recompute the visible leaderboard whenever matches change (e.g. a live result
+  // just came in) — reuses the cached raw reads, so it's instant and fetch-free.
+  useEffect(() => {
+    if (!selectedGroup) return;
+    const cached = leaderboardCacheRef.current[selectedGroup.id];
+    if (cached) applyGroupLeaderboard(selectedGroup, cached, matches);
+    // applyGroupLeaderboard is a local recompute; matches + selectedGroup are the
+    // real triggers.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [matches, selectedGroup]);
 
   const handleSaveChampion = async () => {
     if (!selectedChampion || !user) return;
@@ -643,6 +732,9 @@ export default function UnifiedDashboard() {
         [gid]: { ...(prev[gid] || {}), [matchId]: payload },
       }));
       setSavedPredictions(prev => ({ ...prev, [`${gid}_${matchId}`]: true }));
+      // This group's cached leaderboard predictions are now stale — drop it so
+      // the next visit re-fetches fresh.
+      delete leaderboardCacheRef.current[gid];
     } catch (err) {
       console.error("Error saving prediction:", err);
       await showAlert("Error al guardar el pronóstico.");
@@ -839,11 +931,25 @@ export default function UnifiedDashboard() {
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-neutral-950 text-white font-sans">
-        <div className="flex flex-col items-center gap-4">
-          <div className="h-10 w-10 border-4 border-emerald-500 border-t-transparent rounded-full animate-spin"></div>
-          <span className="text-gray-400 text-sm">Cargando Polla 2026...</span>
-        </div>
+      <div className="min-h-screen flex items-center justify-center bg-neutral-950 text-white font-sans px-6">
+        {loadError ? (
+          <div className="flex flex-col items-center gap-4 text-center max-w-sm">
+            <span className="text-gray-300 text-sm">
+              La carga está tardando demasiado. Puede ser un problema de conexión con la base de datos.
+            </span>
+            <button
+              onClick={() => window.location.reload()}
+              className="min-h-[44px] rounded-xl bg-emerald-600 hover:bg-emerald-500 px-5 text-sm font-bold text-white transition-colors"
+            >
+              Reintentar
+            </button>
+          </div>
+        ) : (
+          <div className="flex flex-col items-center gap-4">
+            <div className="h-10 w-10 border-4 border-emerald-500 border-t-transparent rounded-full animate-spin"></div>
+            <span className="text-gray-400 text-sm">Cargando Polla 2026...</span>
+          </div>
+        )}
       </div>
     );
   }

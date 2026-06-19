@@ -6,8 +6,9 @@ import { onAuthStateChanged, type User as FirebaseUser } from "firebase/auth";
 import { auth, db } from "@/lib/firebase";
 import { collection, getDocs, doc, getDoc, query, where, updateDoc } from "firebase/firestore";
 import { Group, User, Match, Prediction } from "@/types";
-import { groupSchema, userSchema, matchSchema, predictionSchema } from "@/lib/schemas";
+import { groupSchema, userSchema, predictionSchema } from "@/lib/schemas";
 import { parseDoc, parseDocs } from "@/lib/parse";
+import { getMatches } from "@/lib/matches";
 import { groupRulesInputSchema, prizeInputSchema, entryFeeSchema, firstError } from "@/lib/form-schemas";
 import { calculateGroupScores, getOutcome } from "@/lib/scoring";
 import { formatKickoffDateTime, toMs } from "@/lib/dates";
@@ -142,9 +143,8 @@ export default function GroupDetailPage() {
           membersData.push(...parseDocs(userSchema, uSnapshot));
         }
 
-        // 3. Fetch Matches
-        const matchesSnapshot = await getDocs(collection(db, "matches"));
-        const matchesData = parseDocs(matchSchema, matchesSnapshot);
+        // 3. Fetch Matches (from the cached /api/matches endpoint).
+        const matchesData = await getMatches();
         matchesData.sort((a, b) => {
           const timeA = toMs(a.kickoffTime);
           const timeB = toMs(b.kickoffTime);

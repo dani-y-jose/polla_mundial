@@ -118,8 +118,12 @@ service cloud.firestore {
     }
 
     // ---- Matches ----
+    // Public read: the fixture, kickoff times and results are public World Cup
+    // data (no PII). Being public lets the cached /api/matches Route Handler read
+    // them server-side via the REST API without a user token. Writes stay
+    // admin-only.
     match /matches/{matchId} {
-      allow read: if isSignedIn();
+      allow read: if true;
       allow write: if isAdmin();
     }
 
