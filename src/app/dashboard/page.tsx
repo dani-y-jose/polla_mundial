@@ -21,7 +21,7 @@ import { Match, Prediction, User, Group, Invite } from "@/types";
 // Aliased + type-only so it doesn't shadow the DOM `Notification` global used
 // for web-push permission checks below.
 import type { Notification as AppNotification } from "@/types";
-import { predictionSchema, userSchema, groupSchema, championSchema, notificationSchema } from "@/lib/schemas";
+import { matchSchema, predictionSchema, userSchema, groupSchema, championSchema, notificationSchema } from "@/lib/schemas";
 import { parseDoc, parseDocs } from "@/lib/parse";
 import { getMatches } from "@/lib/matches";
 import { predictionInputSchema, prizeInputSchema, groupRulesInputSchema, firstError } from "@/lib/form-schemas";
@@ -523,6 +523,35 @@ export default function UnifiedDashboard() {
       await loadGroupLeaderboard(selected);
     }
   };
+
+  // Live match results: a score entered by an admin propagates here immediately
+  // (real-time, no polling, no reload). The initial paint still comes from the
+  // cached /api/matches; this keeps the list live afterwards. With
+  // persistentLocalCache the first emission is served from IndexedDB instantly.
+  useEffect(() => {
+    if (!user) return;
+    const unsub = onSnapshot(
+      collection(db, "matches"),
+      (snap) => {
+        const live = parseDocs(matchSchema, snap);
+        live.sort((a, b) => toMs(a.kickoffTime) - toMs(b.kickoffTime));
+        setMatches(live);
+      },
+      (err) => console.error("Error listening to matches:", err),
+    );
+    return () => unsub();
+  }, [user]);
+
+  // Recompute the visible leaderboard whenever matches change (e.g. a live result
+  // just came in) — reuses the cached raw reads, so it's instant and fetch-free.
+  useEffect(() => {
+    if (!selectedGroup) return;
+    const cached = leaderboardCacheRef.current[selectedGroup.id];
+    if (cached) applyGroupLeaderboard(selectedGroup, cached, matches);
+    // applyGroupLeaderboard is a local recompute; matches + selectedGroup are the
+    // real triggers.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [matches, selectedGroup]);
 
   const handleSaveChampion = async () => {
     if (!selectedChampion || !user) return;
