@@ -17,6 +17,15 @@ import {
   Spinner,
   EmptyState,
 } from "@/components/ui";
+import {
+  TeamLabel,
+  MatchTeams,
+  PhaseLabel,
+  RankBadge,
+  GroupSelector,
+  WhatsAppShareButton,
+} from "@/components/domain";
+import type { Group } from "@/types";
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
@@ -29,6 +38,11 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 
 export default function StyleguidePage() {
   const [activeFilter, setActiveFilter] = useState("abiertos");
+  const mockGroups = [
+    { id: "g1", name: "Los Cracks", inviteCode: "ABC123" },
+    { id: "g2", name: "Oficina FC", inviteCode: "XYZ789" },
+  ] as unknown as Group[];
+  const [selGroup, setSelGroup] = useState<Group | null>(mockGroups[0]);
 
   return (
     <div className="min-h-screen bg-black text-white px-6 py-10">
@@ -133,6 +147,48 @@ export default function StyleguidePage() {
           <EmptyState className="w-full" icon="⚽" title="Sin partidos">
             No hay partidos para mostrar todavía.
           </EmptyState>
+        </Section>
+
+        <div className="pt-4 border-t border-white/10">
+          <h2 className="text-sm font-black uppercase tracking-widest text-primary-soft">Dominio</h2>
+          <p className="text-xs text-gray-500">Componentes compuestos sobre los primitivos</p>
+        </div>
+
+        <Section title="PhaseLabel">
+          <PhaseLabel phase="group" />
+          <PhaseLabel phase="round_of_16" />
+          <PhaseLabel phase="finals" className="text-sm" />
+        </Section>
+
+        <Section title="TeamLabel · align">
+          <Card className="w-40"><TeamLabel team="Argentina" align="left" /></Card>
+          <Card className="w-40"><TeamLabel team="Brasil" align="right" /></Card>
+        </Section>
+
+        <Section title="MatchTeams · center variable">
+          <Card className="w-full">
+            <MatchTeams homeTeam="Argentina" awayTeam="México" center={<span className="text-sm font-black tabular-nums">2 - 1</span>} />
+          </Card>
+          <Card className="w-full">
+            <MatchTeams homeTeam="España" awayTeam="Alemania" center={<span className="text-[10px] text-gray-500 font-bold uppercase">vs</span>} />
+          </Card>
+        </Section>
+
+        <Section title="RankBadge · circle / pill">
+          {[1, 2, 3, 4].map((r) => <RankBadge key={`c${r}`} rank={r} variant="circle" />)}
+          {[1, 2, 3, 4].map((r) => <RankBadge key={`p${r}`} rank={r} variant="pill" />)}
+        </Section>
+
+        <Section title="GroupSelector">
+          <div className="w-full max-w-xs">
+            <GroupSelector groups={mockGroups} selectedGroup={selGroup} onChange={(id) => setSelGroup(mockGroups.find((g) => g.id === id) ?? null)} label="Grupo Activo" />
+          </div>
+        </Section>
+
+        <Section title="WhatsAppShareButton">
+          <div className="w-full max-w-xs">
+            <WhatsAppShareButton message="¡Únete a mi grupo! Código: ABC123" />
+          </div>
         </Section>
       </div>
     </div>
