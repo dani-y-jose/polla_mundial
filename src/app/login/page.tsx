@@ -14,6 +14,7 @@ import {
 } from "firebase/auth";
 import { auth, db } from "@/lib/firebase";
 import { doc, getDoc, runTransaction } from "firebase/firestore";
+import { getMatches } from "@/lib/matches";
 
 // The single /invites code (if any) that admitted the visitor to the sign-up
 // form. A group invite carries groupId + groupName; a generic admin invite has
@@ -78,6 +79,17 @@ export default function LoginPage() {
     if (typeof window === "undefined") return null;
     return new URLSearchParams(window.location.search).get("invite")?.trim() || null;
   })();
+
+  // Warm the global match list while the visitor is still on the login screen.
+  // `matches` is public, user-independent fixture data (read via the cached
+  // /api/matches endpoint, no auth needed), so the read can run before sign-in.
+  // The dashboard is reached by a client-side navigation that keeps the memo in
+  // src/lib/matches.ts alive, so it reuses this result instead of issuing the
+  // read again after login. Best-effort: failures are ignored (the dashboard
+  // retries), and the catch keeps the ignored promise from logging unhandled.
+  useEffect(() => {
+    getMatches().catch(() => {});
+  }, []);
 
   // Resolve the single invite from the URL (?invite=CODE) so we know whether to
   // show the sign-up form and which group (if any) the account will be offered.
