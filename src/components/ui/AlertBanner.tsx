@@ -1,15 +1,15 @@
 import { cn } from "./cn";
 
-// Inline feedback banner — the four tones the login page hand-rolled (error,
-// success, warning, neutral). Defaults role to "alert" for errors (assertive)
-// and "status" otherwise, so screen readers announce them appropriately.
+// Banner de feedback inline (error, success, warning, neutral). El tono se
+// transmite por el TINTE del fondo (sin franja lateral, sin borde). role="alert"
+// para errores (asertivo) y "status" para el resto.
 export type AlertTone = "error" | "success" | "warning" | "neutral";
 
 const TONES: Record<AlertTone, string> = {
-  error: "bg-danger/15 border-danger/40 text-red-200",
-  success: "bg-primary/15 border-primary/40 text-emerald-200",
-  warning: "bg-warning/15 border-warning/40 text-amber-200",
-  neutral: "bg-white/5 border-white/10 text-gray-300",
+  error: "bg-danger/12",
+  success: "bg-primary/12",
+  warning: "bg-warning/14",
+  neutral: "bg-ink/6",
 };
 
 export type AlertBannerProps = React.HTMLAttributes<HTMLDivElement> & {
@@ -20,7 +20,7 @@ export function AlertBanner({ tone = "neutral", className, role, ...props }: Ale
   return (
     <div
       role={role ?? (tone === "error" ? "alert" : "status")}
-      className={cn("p-3 rounded-xl border text-sm", TONES[tone], className)}
+      className={cn("p-3 rounded-xl text-sm text-ink", TONES[tone], className)}
       {...props}
     />
   );

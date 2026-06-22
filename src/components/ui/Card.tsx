@@ -1,10 +1,13 @@
 import { cn } from "./cn";
 
-// The ubiquitous surface container: `bg-white/5 border border-white/10 rounded-2xl`.
-// `padding` covers the common steps; `blur` adds the glassmorphism backdrop used
-// by the auth/group cards. Gradient/alert surfaces are their own components.
+// Superficie contenedora: `bg-surface` + esquinas redondeadas. SIN borde en
+// reposo (la separación sale del fill: surface es más claro que el bg). Una card
+// interactiva (clickeable) opta por `interactive`, que agrega borde de hover/focus
+// (`.edge`) y un realce de superficie. `padding` cubre los pasos comunes.
 export type CardProps = React.HTMLAttributes<HTMLDivElement> & {
   padding?: "none" | "sm" | "md" | "lg";
+  interactive?: boolean;
+  /** @deprecated Glassmorphism eliminado — se acepta por compat, sin efecto. */
   blur?: boolean;
 };
 
@@ -15,13 +18,14 @@ const PADDING: Record<NonNullable<CardProps["padding"]>, string> = {
   lg: "p-6",
 };
 
-export function Card({ padding = "md", blur = false, className, ...props }: CardProps) {
+export function Card({ padding = "md", interactive = false, blur, className, ...props }: CardProps) {
+  void blur;
   return (
     <div
       className={cn(
-        "bg-white/5 border border-white/10 rounded-2xl",
+        "bg-surface rounded-2xl",
         PADDING[padding],
-        blur && "backdrop-blur-xl",
+        interactive && "edge cursor-pointer transition-colors hover:bg-surface-2",
         className,
       )}
       {...props}

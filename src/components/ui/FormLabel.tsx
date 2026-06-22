@@ -1,23 +1,17 @@
 import { cn } from "./cn";
 
-// Form label. `micro` is the uppercase caption style used by the dashboard/admin
-// forms (default); `default` is the larger login-form style. Always pass htmlFor
-// so the label is associated with its field.
+// Etiqueta de formulario. `micro` = caption chico (sin mayúsculas forzadas, que
+// es un tell de AI); `default` = estilo más grande. Pasá siempre htmlFor para
+// asociar la etiqueta con su campo.
 export type FormLabelProps = React.LabelHTMLAttributes<HTMLLabelElement> & {
   variant?: "micro" | "default";
 };
 
+const VARIANTS: Record<NonNullable<FormLabelProps["variant"]>, string> = {
+  micro: "text-xs font-semibold text-ink-muted",
+  default: "text-sm font-medium text-ink",
+};
+
 export function FormLabel({ variant = "micro", className, ...props }: FormLabelProps) {
-  return (
-    <label
-      className={cn(
-        "block mb-1",
-        variant === "micro"
-          ? "text-[10px] text-gray-400 uppercase tracking-wider font-semibold"
-          : "text-sm font-medium text-gray-300",
-        className,
-      )}
-      {...props}
-    />
-  );
+  return <label className={cn("block mb-1", VARIANTS[variant], className)} {...props} />;
 }

@@ -12,7 +12,7 @@ export type PhaseLabelProps = React.HTMLAttributes<HTMLSpanElement> & {
 export function PhaseLabel({ phase, className, ...props }: PhaseLabelProps) {
   return (
     <span
-      className={cn("text-[10px] font-bold uppercase tracking-wider text-primary-soft", className)}
+      className={cn("text-[10px] font-bold uppercase tracking-wider text-ink-muted", className)}
       {...props}
     >
       {(PHASE_TRANSLATIONS[phase] || phase).toUpperCase()}

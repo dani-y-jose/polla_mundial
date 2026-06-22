@@ -20,7 +20,7 @@ export function WhatsAppShareButton({
       target="_blank"
       rel="noopener noreferrer"
       className={cn(
-        "w-full py-2.5 bg-[#25D366] hover:bg-[#20ba56] text-black font-extrabold text-[11px] rounded-xl flex items-center justify-center gap-2 transition-all font-sans uppercase tracking-wider",
+        "w-full py-2.5 bg-[#25D366] hover:bg-[#1eb455] text-[#0b3d20] font-extrabold text-sm rounded-xl flex items-center justify-center gap-2 transition-colors",
         className,
       )}
     >

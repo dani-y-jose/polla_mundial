@@ -1,18 +1,20 @@
 import { cn } from "./cn";
 
-// The app's button, in the four shapes that actually appear across the routes.
-// Brand colors come from the design tokens (bg-primary / bg-danger) so a
-// redesign re-skins from globals.css. min-h on every size keeps the 44px touch
-// target the DialogProvider already used.
+// El botón de la app, en las cuatro formas que aparecen en las rutas. Colores
+// desde tokens. Sin borde en reposo: `.edge` pinta el borde (`--outline`) sólo
+// en hover/focus (afordancia de interacción). min-h por tamaño = touch 44px.
 
 export type ButtonVariant = "primary" | "secondary" | "danger" | "ghost";
 export type ButtonSize = "sm" | "md" | "lg";
 
 const VARIANTS: Record<ButtonVariant, string> = {
-  primary: "bg-primary hover:bg-primary-hover text-white",
-  secondary: "bg-white/5 hover:bg-white/10 border border-white/10 text-gray-300 hover:text-white",
-  danger: "bg-danger hover:bg-danger-hover text-white",
-  ghost: "bg-transparent hover:bg-white/10 text-gray-300 hover:text-white",
+  // primary es el INVERSO de secondary: el texto de secondary (ink) pasa a ser
+  // el fondo, y el fondo de secondary (surface) pasa a ser el texto. El borde de
+  // hover usa una variante de primary (`--edge`), que sí contrasta sobre el fondo.
+  primary: "bg-ink text-surface hover:bg-[var(--ink-muted)] [--edge:var(--primary)]",
+  secondary: "bg-surface text-ink hover:bg-surface-2",
+  danger: "bg-danger text-white hover:bg-danger-hover",
+  ghost: "bg-transparent text-ink-muted hover:text-ink hover:bg-surface",
 };
 
 const SIZES: Record<ButtonSize, string> = {
@@ -41,9 +43,9 @@ export function Button({
     <button
       type={type}
       className={cn(
-        "inline-flex items-center justify-center gap-2 rounded-xl font-bold transition-colors",
+        "edge inline-flex items-center justify-center gap-2 rounded-xl font-bold transition-colors",
         "disabled:opacity-50 disabled:cursor-not-allowed",
-        "focus:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-black",
+        "focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg)]",
         VARIANTS[variant],
         SIZES[size],
         fullWidth && "w-full",

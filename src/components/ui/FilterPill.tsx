@@ -1,13 +1,15 @@
 import { cn } from "./cn";
 
-// Toggle pill used by the dashboard prediction filters (status / phase / group
-// letter). aria-pressed makes the on/off state available to assistive tech.
+// Pastilla toggle (filtros de predicciones: estado / fase / letra de grupo).
+// Activa = relleno sólido; inactiva = surface con borde de hover (`.edge`).
+// aria-pressed expone el estado on/off a tecnología asistiva.
 export type FilterPillAccent = "primary" | "warning" | "indigo";
 
 const ACTIVE: Record<FilterPillAccent, string> = {
-  primary: "bg-primary text-black",
-  warning: "bg-warning text-black",
-  indigo: "bg-indigo-500 text-white",
+  primary: "bg-primary text-[var(--on-primary)]",
+  warning: "bg-warning text-[#3a2700]",
+  // "indigo" no existe en la paleta monocromo → se mapea al accent.
+  indigo: "bg-[var(--accent)] text-[var(--bg)]",
 };
 
 export type FilterPillProps = React.ButtonHTMLAttributes<HTMLButtonElement> & {
@@ -27,9 +29,9 @@ export function FilterPill({
       type={type}
       aria-pressed={active}
       className={cn(
-        "px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider transition-all",
-        "focus:outline-none focus-visible:ring-2 focus-visible:ring-primary",
-        active ? ACTIVE[accent] : "bg-white/5 text-gray-400 hover:text-white",
+        "edge px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider transition-colors",
+        "focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]",
+        active ? ACTIVE[accent] : "bg-surface text-ink-muted hover:text-ink",
         className,
       )}
       {...props}

@@ -1,10 +1,9 @@
 import type { Group } from "@/types";
 import { cn } from "@/components/ui";
 
-// Active-group picker shared across the dashboard tabs (promoted from a local
-// component so admin/groups can reuse it). Renders nothing when the user has no
-// groups. Keeps its own select styling (white/5 surface, emerald text) rather
-// than the neutral <Select> primitive, to stay a faithful drop-in.
+// Selector del grupo activo, compartido por las tabs del dashboard. No renderiza
+// nada si el usuario no tiene grupos. Mantiene su propio <select> (texto en
+// negrita) al tono del primitivo Select.
 export type GroupSelectorProps = {
   groups: Group[];
   selectedGroup: Group | null;
@@ -23,14 +22,14 @@ export function GroupSelector({
   if (groups.length === 0) return null;
   return (
     <div className={cn("space-y-1", className)}>
-      <label className="text-[10px] text-gray-500 uppercase tracking-wider font-semibold">{label}</label>
+      <label className="block text-xs font-semibold text-ink-muted">{label}</label>
       <select
         value={selectedGroup?.id || ""}
         onChange={(e) => onChange(e.target.value)}
-        className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary text-sm font-bold text-primary-soft"
+        className="w-full px-4 py-3 rounded-xl text-sm font-bold bg-surface-2 text-ink border-2 border-transparent transition-colors hover:border-[var(--accent)] focus:outline-none focus:border-[var(--accent)] focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
       >
         {groups.map((group) => (
-          <option key={group.id} value={group.id} className="bg-neutral-950 text-white">
+          <option key={group.id} value={group.id} className="bg-surface text-ink">
             {group.name} ({group.inviteCode})
           </option>
         ))}

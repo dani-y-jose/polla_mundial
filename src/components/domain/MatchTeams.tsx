@@ -1,17 +1,28 @@
 import { cn } from "@/components/ui";
 import { TeamLabel } from "./TeamLabel";
 
-// The home — center — away row at the heart of every match card. `center` is
-// whatever belongs between the teams in context: a final score ("2 - 1"), a
-// "vs", a live label, or the prediction score inputs.
+// La fila local — centro — visitante del corazón de toda match card. `center`
+// es lo que va entre los equipos: un marcador ("2 - 1"), un "vs", o un label.
+// `direction="row"` (default): equipos horizontales (home a la derecha, away a
+// la izquierda). `direction="stacked"`: equipos apilados y centrados (hero).
 export type MatchTeamsProps = {
   homeTeam: string;
   awayTeam: string;
   center?: React.ReactNode;
+  direction?: "row" | "stacked";
   className?: string;
 };
 
-export function MatchTeams({ homeTeam, awayTeam, center, className }: MatchTeamsProps) {
+export function MatchTeams({ homeTeam, awayTeam, center, direction = "row", className }: MatchTeamsProps) {
+  if (direction === "stacked") {
+    return (
+      <div className={cn("flex items-center justify-between gap-2", className)}>
+        <TeamLabel team={homeTeam} direction="stacked" className="flex-1" />
+        <div className="shrink-0 px-2 text-center">{center}</div>
+        <TeamLabel team={awayTeam} direction="stacked" className="flex-1" />
+      </div>
+    );
+  }
   return (
     <div className={cn("flex items-center gap-2", className)}>
       <TeamLabel team={homeTeam} align="right" className="flex-1" />
