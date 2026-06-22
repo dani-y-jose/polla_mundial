@@ -31,6 +31,7 @@ import { isChampionLocked, getMaxMembersPerGroup, DEFAULT_MAX_MEMBERS_PER_GROUP 
 import { formatKickoffDateTime, formatKickoffTime, formatKickoffDate, toMs } from "@/lib/dates";
 import { enablePushNotifications, pushIsSupported } from "@/lib/messaging";
 import { useDialog } from "@/components/DialogProvider";
+import { PHASE_TRANSLATIONS, DEFAULT_GROUP_RULES, SOON_WINDOW_MIN, PREDICTIONS_PER_PAGE } from "@/lib/constants";
 
 type Tab = "home" | "predictions" | "table" | "groups" | "profile";
 
@@ -41,14 +42,6 @@ type GroupLeaderboardRaw = {
   members: User[];
   predictions: Prediction[];
   champions: Record<string, string>;
-};
-
-const PHASE_TRANSLATIONS: Record<string, string> = {
-  group: "Fase de Grupos",
-  round_of_16: "Octavos de Final",
-  quarter_finals: "Cuartos de Final",
-  semi_finals: "Semifinales",
-  finals: "Gran Final"
 };
 
 // Group-stage matches encode their group letter in the seeded id, e.g.
@@ -463,15 +456,7 @@ export default function UnifiedDashboard() {
   function applyGroupLeaderboard(group: Group, raw: GroupLeaderboardRaw, matchesList?: Match[]) {
     setMemberChampions(raw.champions);
 
-    const defaultRules = {
-      exactScorePoints: 3,
-      correctOutcomePoints: 1,
-      uniquePredictionPoints: 0,
-      quarterFinalsBonus: 0,
-      semiFinalsBonus: 0,
-      finalsBonus: 0,
-    };
-    const activeRules = group.rules || defaultRules;
+    const activeRules = group.rules || DEFAULT_GROUP_RULES;
     // Use freshly-fetched matches when provided (during initial load the `matches`
     // state is still empty here), otherwise fall back to the current state.
     const matchesForScoring = matchesList ?? matches;
@@ -993,7 +978,6 @@ export default function UnifiedDashboard() {
   // in this group). These are ephemeral, computed in-memory from `matches` —
   // Phase A has no backend to fan out reminder docs, so they only show while the
   // app is open. The scheduled push (Phase B) will own the real, on-time send.
-  const SOON_WINDOW_MIN = 60; // a match counts as "starting soon" within this many minutes of kickoff
   const currentGroupPreds = selectedGroup ? (predictionsByGroup[selectedGroup.id] || {}) : {};
 
   // Matches kicking off within the next hour (any prediction state). The card
@@ -1020,7 +1004,6 @@ export default function UnifiedDashboard() {
     + startingSoonMatches.length + missingPredictions24h.length;
 
   // Paginate the predictions list so the bottom of the page stays reachable.
-  const PREDICTIONS_PER_PAGE = 10;
   // Group letters present among the group-stage matches, e.g. ["A","B",...],
   // used to build the per-group sub-filter pills shown under "Grupos".
   const groupLetters = Array.from(

@@ -13,20 +13,7 @@ import { groupRulesInputSchema, prizeInputSchema, entryFeeSchema, firstError } f
 import { calculateGroupScores, getOutcome } from "@/lib/scoring";
 import { formatKickoffDateTime, toMs } from "@/lib/dates";
 import { useDialog } from "@/components/DialogProvider";
-
-const PHASE_TRANSLATIONS: Record<string, string> = {
-  group: "Fase de Grupos",
-  round_of_16: "Octavos de Final",
-  quarter_finals: "Cuartos de Final",
-  semi_finals: "Semifinales",
-  finals: "Gran Final"
-};
-
-const RESOLUTION_TRANSLATIONS: Record<string, string> = {
-  normal: "90 Minutos",
-  extra_time: "Tiempo Extra",
-  penalties: "Penales"
-};
+import { PHASE_TRANSLATIONS, RESOLUTION_TRANSLATIONS, DEFAULT_GROUP_RULES } from "@/lib/constants";
 
 export default function GroupDetailPage() {
   const params = useParams();
@@ -159,15 +146,7 @@ export default function GroupDetailPage() {
         setAllPredictions(predsData);
 
         // 5. Calculate scores dynamically per group rules
-        const defaultRules = {
-          exactScorePoints: 3,
-          correctOutcomePoints: 1,
-          uniquePredictionPoints: 0,
-          quarterFinalsBonus: 0,
-          semiFinalsBonus: 0,
-          finalsBonus: 0
-        };
-        const activeRules = groupData.rules || defaultRules;
+        const activeRules = groupData.rules || DEFAULT_GROUP_RULES;
         const calculatedScores = calculateGroupScores(groupId, groupData.members, matchesData, predsData, activeRules);
         setGroupScores(calculatedScores);
 

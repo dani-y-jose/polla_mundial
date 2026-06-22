@@ -13,20 +13,7 @@ import { calculatePoints } from "@/lib/scoring";
 import { getMaxMembersPerGroup, DEFAULT_MAX_MEMBERS_PER_GROUP } from "@/lib/config";
 import { formatKickoffDateTime, toMs } from "@/lib/dates";
 import { useDialog } from "@/components/DialogProvider";
-
-const PHASE_TRANSLATIONS: Record<string, string> = {
-  group: "Fase de Grupos",
-  round_of_16: "Octavos de Final",
-  quarter_finals: "Cuartos de Final",
-  semi_finals: "Semifinales",
-  finals: "Gran Final"
-};
-
-const RESOLUTION_TRANSLATIONS: Record<string, string> = {
-  normal: "90 Minutos",
-  extra_time: "Tiempo Extra",
-  penalties: "Penales"
-};
+import { PHASE_TRANSLATIONS, RESOLUTION_TRANSLATIONS } from "@/lib/constants";
 
 export default function AdminPage() {
   const [user, setUser] = useState<User | null>(null);
