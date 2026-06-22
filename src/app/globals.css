@@ -1,10 +1,24 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
+/* ── Design tokens ─────────────────────────────────────────────────────────
+   The app already spoke a consistent visual language in raw Tailwind classes
+   (emerald primary, red danger, dark surfaces). These tokens just *name* it so
+   components — and a future redesign — have one place to re-skin from. Generates
+   utilities like bg-primary / text-primary / text-danger / bg-warning, etc. */
+@theme {
+  --color-primary: #059669;        /* emerald-600 — matches viewport themeColor */
+  --color-primary-hover: #10b981;  /* emerald-500 */
+  --color-primary-soft: #34d399;   /* emerald-400 — text accent on dark */
+  --color-danger: #dc2626;         /* red-600 */
+  --color-danger-hover: #ef4444;   /* red-500 */
+  --color-warning: #f59e0b;        /* amber-500 */
+
+  /* Decorative gradient-blob animation used by the auth/landing hero. */
+  --animate-blob: blob 7s infinite ease-in-out;
 }
 
+/* Map runtime CSS vars (next/font on <html>, base palette below) onto Tailwind
+   theme keys. `inline` so the utilities resolve to the referenced var. */
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
@@ -12,20 +26,23 @@
   --font-mono: var(--font-geist-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+/* The app is dark-only (every surface paints bg-black / neutral-950 on top), so
+   the base is black — no light/dark split, and no white flash before paint. */
+:root {
+  --background: #000000;
+  --foreground: #ededed;
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  /* Use the loaded Geist font everywhere. Was hardcoded Arial, which leaked onto
+     any screen that didn't set font-sans itself (e.g. /login). */
+  font-family: var(--font-geist-sans), system-ui, -apple-system, sans-serif;
 }
 
-/* Dialog modal entrance (see src/components/DialogProvider.tsx). Gated behind
+/* ── Keyframes ─────────────────────────────────────────────────────────────
+   Dialog modal entrance (see src/components/DialogProvider.tsx). Gated behind
    motion-safe: in the markup, so reduced-motion users get no animation. */
 @keyframes fadeIn {
   from { opacity: 0; }
@@ -35,4 +52,22 @@ body {
 @keyframes popIn {
   from { opacity: 0; transform: translateY(8px) scale(0.97); }
   to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+/* Hero gradient blobs. Referenced as `animate-blob` in the markup but never
+   defined, so the blobs sat static — this makes them actually drift. */
+@keyframes blob {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  33% { transform: translate(24px, -32px) scale(1.08); }
+  66% { transform: translate(-18px, 18px) scale(0.94); }
+}
+
+/* Stagger utilities for the blobs. Unlayered, so the animation-delay longhand
+   wins over the animate-blob shorthand regardless of source order. */
+.animation-delay-2000 { animation-delay: 2s; }
+.animation-delay-4000 { animation-delay: 4s; }
+
+/* Respect reduced-motion for the always-on hero blobs. */
+@media (prefers-reduced-motion: reduce) {
+  .animate-blob { animation: none; }
 }
