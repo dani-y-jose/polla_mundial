@@ -14,6 +14,8 @@ import { getMaxMembersPerGroup, DEFAULT_MAX_MEMBERS_PER_GROUP } from "@/lib/conf
 import { formatKickoffDateTime, toMs } from "@/lib/dates";
 import { useDialog } from "@/components/DialogProvider";
 import { PHASE_TRANSLATIONS, RESOLUTION_TRANSLATIONS } from "@/lib/constants";
+import { Button, Input, Select, FormLabel } from "@/components/ui";
+import { PhaseLabel } from "@/components/domain";
 
 export default function AdminPage() {
   const [user, setUser] = useState<User | null>(null);
@@ -289,12 +291,9 @@ export default function AdminPage() {
       <div className="max-w-4xl mx-auto space-y-12">
         <div className="flex justify-between items-center">
           <h1 className="text-3xl font-bold">Panel de Administración</h1>
-          <button
-            onClick={() => router.push("/dashboard")}
-            className="inline-flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-semibold rounded-lg shadow-lg shadow-emerald-600/20 transition-colors shrink-0"
-          >
+          <Button onClick={() => router.push("/dashboard")} className="shrink-0">
             <span aria-hidden="true">←</span> Volver al Tablero
-          </button>
+          </Button>
         </div>
 
         {/* Global Config: Max members per group */}
@@ -333,24 +332,22 @@ export default function AdminPage() {
         <section className="bg-white/5 p-6 rounded-xl border border-white/10">
           <h2 className="text-xl font-semibold mb-6">Crear Nuevo Partido</h2>
           <form onSubmit={handleCreateMatch} className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div><label className="text-sm text-gray-400">Equipo Local</label><input required value={homeTeam} onChange={e=>setHomeTeam(e.target.value)} className="w-full mt-1 px-3 py-2 bg-black/50 border border-white/10 rounded" /></div>
-            <div><label className="text-sm text-gray-400">Equipo Visitante</label><input required value={awayTeam} onChange={e=>setAwayTeam(e.target.value)} className="w-full mt-1 px-3 py-2 bg-black/50 border border-white/10 rounded" /></div>
-            <div><label className="text-sm text-gray-400">Hora de Inicio</label><input type="datetime-local" required value={kickoffTime} onChange={e=>setKickoffTime(e.target.value)} className="w-full mt-1 px-3 py-2 bg-black/50 border border-white/10 rounded" /></div>
-            <div><label className="text-sm text-gray-400">Fase</label>
-              <select value={phase} onChange={e=>setPhase(e.target.value as MatchPhase)} className="w-full mt-1 px-3 py-2 bg-black/50 border border-white/10 rounded">
-                <option value="group">Fase de Grupos</option>
-                <option value="round_of_16">Octavos de Final</option>
-                <option value="quarter_finals">Cuartos de Final</option>
-                <option value="semi_finals">Semifinales</option>
-                <option value="finals">Gran Final</option>
-              </select>
+            <div><FormLabel variant="default" htmlFor="m-home">Equipo Local</FormLabel><Input id="m-home" required value={homeTeam} onChange={e=>setHomeTeam(e.target.value)} /></div>
+            <div><FormLabel variant="default" htmlFor="m-away">Equipo Visitante</FormLabel><Input id="m-away" required value={awayTeam} onChange={e=>setAwayTeam(e.target.value)} /></div>
+            <div><FormLabel variant="default" htmlFor="m-kick">Hora de Inicio</FormLabel><Input id="m-kick" type="datetime-local" required value={kickoffTime} onChange={e=>setKickoffTime(e.target.value)} /></div>
+            <div><FormLabel variant="default" htmlFor="m-phase">Fase</FormLabel>
+              <Select id="m-phase" value={phase} onChange={e=>setPhase(e.target.value as MatchPhase)}>
+                {Object.entries(PHASE_TRANSLATIONS).map(([value, label]) => (
+                  <option key={value} value={value}>{label}</option>
+                ))}
+              </Select>
             </div>
-            <div><label className="text-sm text-gray-400">Ciudad</label><input required value={city} onChange={e=>setCity(e.target.value)} className="w-full mt-1 px-3 py-2 bg-black/50 border border-white/10 rounded" /></div>
-            <div><label className="text-sm text-gray-400">Estadio</label><input required value={stadiumName} onChange={e=>setStadiumName(e.target.value)} className="w-full mt-1 px-3 py-2 bg-black/50 border border-white/10 rounded" /></div>
-            <div><label className="text-sm text-gray-400">Nombre del Árbitro</label><input required value={refereeName} onChange={e=>setRefereeName(e.target.value)} className="w-full mt-1 px-3 py-2 bg-black/50 border border-white/10 rounded" /></div>
-            <div><label className="text-sm text-gray-400">País del Árbitro</label><input required value={refereeCountry} onChange={e=>setRefereeCountry(e.target.value)} className="w-full mt-1 px-3 py-2 bg-black/50 border border-white/10 rounded" /></div>
+            <div><FormLabel variant="default" htmlFor="m-city">Ciudad</FormLabel><Input id="m-city" required value={city} onChange={e=>setCity(e.target.value)} /></div>
+            <div><FormLabel variant="default" htmlFor="m-stadium">Estadio</FormLabel><Input id="m-stadium" required value={stadiumName} onChange={e=>setStadiumName(e.target.value)} /></div>
+            <div><FormLabel variant="default" htmlFor="m-ref">Nombre del Árbitro</FormLabel><Input id="m-ref" required value={refereeName} onChange={e=>setRefereeName(e.target.value)} /></div>
+            <div><FormLabel variant="default" htmlFor="m-refc">País del Árbitro</FormLabel><Input id="m-refc" required value={refereeCountry} onChange={e=>setRefereeCountry(e.target.value)} /></div>
             <div className="md:col-span-2 pt-4 flex items-center gap-3">
-              <button type="submit" disabled={createLoading} className="px-6 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 rounded font-medium">{createLoading ? "Agregando..." : "Agregar Partido"}</button>
+              <Button type="submit" disabled={createLoading}>{createLoading ? "Agregando..." : "Agregar Partido"}</Button>
               {matchCreated && <span className="text-sm text-emerald-400 font-bold">✓ Partido creado con éxito</span>}
             </div>
           </form>
@@ -379,7 +376,7 @@ export default function AdminPage() {
             {filteredMatches.map(match => (
               <div key={match.id} className="bg-white/5 p-6 rounded-xl border border-white/10 flex flex-col md:flex-row gap-6 items-center">
                 <div className="flex-1">
-                  <div className="text-sm text-emerald-400">{(PHASE_TRANSLATIONS[match.phase] || match.phase).toUpperCase()}</div>
+                  <PhaseLabel phase={match.phase} className="block text-sm" />
                   <div className="text-lg font-bold">{match.homeTeam} vs {match.awayTeam}</div>
                   <div className="text-sm text-gray-400">{formatKickoffDateTime(match.kickoffTime)}</div>
                 </div>
