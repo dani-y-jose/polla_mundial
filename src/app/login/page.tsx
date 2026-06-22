@@ -15,6 +15,7 @@ import {
 import { auth, db } from "@/lib/firebase";
 import { doc, getDoc, runTransaction } from "firebase/firestore";
 import { getMatches } from "@/lib/matches";
+import { Button, Input, FormLabel, AlertBanner } from "@/components/ui";
 
 // The single /invites code (if any) that admitted the visitor to the sign-up
 // form. A group invite carries groupId + groupName; a generic admin invite has
@@ -283,56 +284,52 @@ export default function LoginPage() {
         </h2>
         
         {error && (
-          <div className="mb-4 p-3 bg-red-500/20 border border-red-500/50 text-red-200 rounded-lg text-sm">
-            {error}
-          </div>
+          <AlertBanner tone="error" className="mb-4">{error}</AlertBanner>
         )}
 
         {/* Invite-only gate feedback (only relevant while signing up). */}
         {isSignUp && invite.status === "checking" && (
-          <div className="mb-4 p-3 bg-white/5 border border-white/10 text-gray-300 rounded-lg text-sm">
-            Validando invitación…
-          </div>
+          <AlertBanner tone="neutral" className="mb-4">Validando invitación…</AlertBanner>
         )}
         {isSignUp && invite.status === "valid" && (
-          <div className="mb-4 p-3 bg-emerald-500/15 border border-emerald-500/40 text-emerald-200 rounded-lg text-sm">
+          <AlertBanner tone="success" className="mb-4">
             {invite.groupId
               ? <>Invitación válida 🎉 Al registrarte podrás unirte a <span className="font-bold">{invite.groupName || "tu grupo"}</span>.</>
               : <>Invitación válida 🎉 {invite.remaining} {invite.remaining === 1 ? "cupo disponible" : "cupos disponibles"}.</>}
-          </div>
+          </AlertBanner>
         )}
         {isSignUp && (invite.status === "invalid" || invite.status === "none") && (
-          <div className="mb-4 p-3 bg-amber-500/15 border border-amber-500/40 text-amber-200 rounded-lg text-sm">
+          <AlertBanner tone="warning" className="mb-4">
             {invite.status === "invalid"
               ? (invite as { reason: string }).reason
               : "El registro es solo por invitación."}{" "}
             Necesitas un enlace de invitación para crear una cuenta. Si ya tienes cuenta, inicia sesión.
-          </div>
+          </AlertBanner>
         )}
 
         <form onSubmit={handleAuth} className="space-y-4">
           {isSignUp && canSignUp && (
             <>
               <div>
-                <label className="block text-sm font-medium text-gray-300 mb-1">Nombre Completo</label>
-                <input
+                <FormLabel variant="default" htmlFor="name">Nombre Completo</FormLabel>
+                <Input
+                  id="name"
                   type="text"
                   required
                   value={name}
                   onChange={(e) => setName(e.target.value)}
-                  className="w-full px-4 py-2 bg-black/50 border border-white/10 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500 transition-all"
                   placeholder="¿Cómo quieres que te llamemos?"
                 />
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-300 mb-1">Edad</label>
-                <input
+                <FormLabel variant="default" htmlFor="age">Edad</FormLabel>
+                <Input
+                  id="age"
                   type="number"
                   required
                   value={age}
                   onChange={(e) => setAge(e.target.value)}
-                  className="w-full px-4 py-2 bg-black/50 border border-white/10 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500 transition-all"
                   placeholder="Tu edad"
                   min="1"
                   max="120"
@@ -340,24 +337,24 @@ export default function LoginPage() {
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-300 mb-1">Ciudad</label>
-                <input
+                <FormLabel variant="default" htmlFor="city">Ciudad</FormLabel>
+                <Input
+                  id="city"
                   type="text"
                   required
                   value={city}
                   onChange={(e) => setCity(e.target.value)}
-                  className="w-full px-4 py-2 bg-black/50 border border-white/10 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500 transition-all"
                   placeholder="Tu ciudad"
                 />
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-300 mb-1">Barrio (Opcional)</label>
-                <input
+                <FormLabel variant="default" htmlFor="neighborhood">Barrio (Opcional)</FormLabel>
+                <Input
+                  id="neighborhood"
                   type="text"
                   value={neighborhood}
                   onChange={(e) => setNeighborhood(e.target.value)}
-                  className="w-full px-4 py-2 bg-black/50 border border-white/10 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500 transition-all"
                   placeholder="Tu barrio"
                 />
               </div>
@@ -365,36 +362,32 @@ export default function LoginPage() {
           )}
           
           <div>
-            <label className="block text-sm font-medium text-gray-300 mb-1">Correo Electrónico</label>
-            <input
+            <FormLabel variant="default" htmlFor="email">Correo Electrónico</FormLabel>
+            <Input
+              id="email"
               type="email"
               required
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              className="w-full px-4 py-2 bg-black/50 border border-white/10 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500 transition-all"
               placeholder="usuario@ejemplo.com"
             />
           </div>
-          
+
           <div>
-            <label className="block text-sm font-medium text-gray-300 mb-1">Contraseña</label>
-            <input
+            <FormLabel variant="default" htmlFor="password">Contraseña</FormLabel>
+            <Input
+              id="password"
               type="password"
               required
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              className="w-full px-4 py-2 bg-black/50 border border-white/10 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500 transition-all"
               placeholder="••••••••"
             />
           </div>
 
-          <button
-            type="submit"
-            disabled={loading || (isSignUp && !canSignUp)}
-            className="w-full py-3 px-4 bg-emerald-600 hover:bg-emerald-500 text-white font-semibold rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed mt-6"
-          >
+          <Button type="submit" fullWidth className="mt-6" disabled={loading || (isSignUp && !canSignUp)}>
             {loading ? "Por favor espera..." : isSignUp ? "Registrarse" : "Iniciar Sesión"}
-          </button>
+          </Button>
         </form>
 
         <div className="flex items-center my-6">
