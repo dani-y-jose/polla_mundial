@@ -137,6 +137,8 @@ export default function DashboardPage() {
   const [predLetter, setPredLetter] = useState<string>("all");
   const [predLimit, setPredLimit] = useState(10);
   const [predSearch, setPredSearch] = useState("");
+  // Partidos jugados con el panel de "pronósticos del grupo" abierto (set de matchId).
+  const [openGroupPreds, setOpenGroupPreds] = useState<Set<string>>(() => new Set());
 
   // Reloj liviano (30s) para clasificar partidos en vivo / hoy / próximos.
   const [now, setNow] = useState(() => Date.now());
@@ -524,6 +526,68 @@ export default function DashboardPage() {
     </div>
   );
 
+  const toggleGroupPreds = (matchId: string) =>
+    setOpenGroupPreds((prev) => {
+      const next = new Set(prev);
+      next.has(matchId) ? next.delete(matchId) : next.add(matchId);
+      return next;
+    });
+
+  // Card de "pronósticos del grupo" para un partido ya jugado: resultado al centro
+  // + el marcador que predijo cada integrante (mismo bloque que el de "En vivo").
+  const renderGroupPredsCard = (m: Match) => {
+    const preds = groupPreds[m.id] ?? {};
+    const result = m.homeScore != null && m.awayScore != null ? { home: m.homeScore, away: m.awayScore } : null;
+    return (
+      <Card key={m.id} padding="md" className="space-y-3">
+        <div className="flex items-center justify-between gap-2">
+          <PhaseLabel phase={m.phase} />
+          <MatchStatusBadge status={m.status === "finished" ? "finished" : "locked"} />
+        </div>
+        <MatchTeams
+          homeTeam={m.homeTeam}
+          awayTeam={m.awayTeam}
+          center={
+            result ? (
+              <span className="font-display text-2xl font-extrabold tabular-nums leading-none text-ink whitespace-nowrap">
+                {result.home}
+                <span className="px-1 text-ink-faint">-</span>
+                {result.away}
+              </span>
+            ) : (
+              <span className="font-display text-2xl font-extrabold leading-none text-ink-faint">–</span>
+            )
+          }
+        />
+        <div>
+          {(selectedGroup?.members ?? []).map((uid) => {
+            const p = preds[uid];
+            return (
+              <MatchPredictionRow
+                key={uid}
+                name={memberNames[uid] ?? "—"}
+                you={uid === user?.uid}
+                prediction={p ? { home: p.predictedHomeScore, away: p.predictedAwayScore } : null}
+                pointsEarned={p?.pointsEarned}
+                exact={
+                  result && p
+                    ? p.predictedHomeScore === result.home && p.predictedAwayScore === result.away
+                    : undefined
+                }
+              />
+            );
+          })}
+        </div>
+        <button
+          onClick={() => toggleGroupPreds(m.id)}
+          className="w-full text-center text-[11px] font-bold text-[var(--accent)] transition-opacity hover:opacity-70"
+        >
+          Ocultar pronósticos
+        </button>
+      </Card>
+    );
+  };
+
   const emptyHome = liveMatches.length === 0 && todayMatches.length === 0 && upcomingMatches.length === 0;
 
   // Tabla: entradas para el componente Leaderboard + si ya hay resultados.
@@ -825,6 +889,7 @@ export default function DashboardPage() {
                         />
                       );
                     }
+                    if (openGroupPreds.has(m.id)) return renderGroupPredsCard(m);
                     const result = m.homeScore != null && m.awayScore != null ? { home: m.homeScore, away: m.awayScore } : null;
                     return (
                       <MatchCard
@@ -839,6 +904,14 @@ export default function DashboardPage() {
                         pointsEarned={saved?.pointsEarned}
                         resolutionLabel={
                           m.status === "finished" && m.resolutionMethod ? RESOLUTION_TRANSLATIONS[m.resolutionMethod] : undefined
+                        }
+                        footer={
+                          <button
+                            onClick={() => toggleGroupPreds(m.id)}
+                            className="w-full text-center text-[11px] font-bold text-[var(--accent)] transition-opacity hover:opacity-70"
+                          >
+                            Ver pronósticos del grupo
+                          </button>
                         }
                       />
                     );
