@@ -1,38 +1,215 @@
 @import "tailwindcss";
 
+/* ══════════════════════════════════════════════════════════════════════════
+   POLLA MUNDIAL · Design tokens — MONOCROMO TEAL, invertido claro/oscuro.
+   ──────────────────────────────────────────────────────────────────────────
+   Una sola paleta primaria (los hex EXACTOS del usuario). El tema se invierte:
+   claro = teal claro de fondo + tinta teal oscura; oscuro = al revés.
+   Los accents (danger/warning) son los ÚNICOS no-teal, sólo para estados.
+   El tema lo maneja [data-theme] en <html> (lo resuelve el script anti-flash).
+   ════════════════════════════════════════════════════════════════════════ */
+
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  /* ── Paleta primaria — TEAL (hex exactos del usuario) ──────────────────── */
+  --teal-50:  #e5fffd;
+  --teal-100: #ccfffc;
+  --teal-200: #99fff8;
+  --teal-300: #66fff5;
+  --teal-400: #33fff1;
+  --teal-500: #00ffee;
+  --teal-600: #00ccbe;
+  --teal-700: #00998f;
+  --teal-800: #00665f;
+  --teal-900: #003330;
+  --teal-950: #002421;
+
+  /* ── Accents funcionales — únicos no-teal, sólo error/aviso ────────────── */
+  --coral-400: #ff7a6b;
+  --coral-500: #f2563f;
+  --coral-600: #d83a23;
+  --orange-400: #ff9d4d;
+  --orange-500: #ee7a1d;
+  --orange-600: #c75f10;
+
+  /* ── Tokens semánticos — TEMA CLARO (default) ──────────────────────────── */
+  color-scheme: light;
+
+  --bg:        var(--teal-200);   /* fondo de página (ancla) */
+  --bg-overlay: color-mix(in srgb, var(--bg) 93%, transparent); /* velo sobre la imagen de fondo (claro = casi plano: la imagen es nocturna) */
+  --surface:   var(--teal-100);   /* capa +1 (card): más claro que el bg */
+  --surface-2: var(--teal-50);    /* capa +2 (elevado): lo más claro */
+  --ink:       var(--teal-950);   /* texto principal */
+  --ink-muted: var(--teal-800);   /* texto 2º (AA sobre superficies claras) */
+  --ink-faint: var(--teal-700);   /* hints */
+  --hairline:  color-mix(in srgb, var(--teal-900) 16%, transparent);
+
+  --primary:        var(--teal-600);   /* relleno de acción */
+  --primary-strong: var(--teal-700);   /* hover/borde */
+  --on-primary:     var(--teal-950);   /* texto sobre primary */
+  --accent:         var(--teal-900);   /* destaque (raro) */
+
+  --danger:  var(--coral-500);
+  --warning: var(--orange-500);
+
+  /* Podio — colores metálicos representativos (medallas). Excepción al teal. */
+  --gold:   #e6b422;
+  --silver: #9aa6af;
+  --bronze: #c77b3b;
 }
 
+/* ── TEMA OSCURO — invierte la paleta ───────────────────────────────────────
+   El script (layout.tsx) resuelve system→light/dark, así que CSS sólo necesita
+   el default (claro) y este override. */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
+  --bg:        var(--teal-950);
+  --bg-overlay: color-mix(in srgb, var(--bg) 60%, transparent); /* velo sobre la imagen de fondo (oscuro = estadio visible) */
+  --surface:   var(--teal-900);
+  --surface-2: var(--teal-800);
+  --ink:       var(--teal-50);
+  --ink-muted: var(--teal-300);
+  --ink-faint: var(--teal-500);
+  --hairline:  color-mix(in srgb, var(--teal-200) 16%, transparent);
+
+  --primary:        var(--teal-500);
+  --primary-strong: var(--teal-400);
+  --on-primary:     var(--teal-950);
+  --accent:         var(--teal-600);
+
+  --danger:  var(--coral-400);
+  --warning: var(--orange-400);
+
+  /* Podio — metálicos, un toque más claros para el fondo oscuro. */
+  --gold:   #f0c43a;
+  --silver: #c2ccd4;
+  --bronze: #d98e4f;
+}
+
+/* ── Mapear a Tailwind (utilidades bg-bg / text-ink / bg-teal-500 / …). Inline
+   para que resuelvan el var en el punto de uso y cambien con el tema. ─────── */
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --color-bg:         var(--bg);
+  --color-surface:    var(--surface);
+  --color-surface-2:  var(--surface-2);
+  --color-ink:        var(--ink);
+  --color-ink-muted:  var(--ink-muted);
+  --color-ink-faint:  var(--ink-faint);
+
+  --color-primary:    var(--primary);
+  --color-accent:     var(--accent);
+  --color-danger:     var(--danger);
+  --color-warning:    var(--warning);
+  --color-gold:       var(--gold);
+  --color-silver:     var(--silver);
+  --color-bronze:     var(--bronze);
+
+  /* Rampa teal completa → bg-teal-50 … bg-teal-950 */
+  --color-teal-50:  var(--teal-50);
+  --color-teal-100: var(--teal-100);
+  --color-teal-200: var(--teal-200);
+  --color-teal-300: var(--teal-300);
+  --color-teal-400: var(--teal-400);
+  --color-teal-500: var(--teal-500);
+  --color-teal-600: var(--teal-600);
+  --color-teal-700: var(--teal-700);
+  --color-teal-800: var(--teal-800);
+  --color-teal-900: var(--teal-900);
+  --color-teal-950: var(--teal-950);
+
+  /* Compat: el código viejo aún usa estos nombres */
+  --color-primary-hover:    var(--primary-strong);
+  --color-primary-soft:     var(--accent);
+  --color-primary-contrast: var(--on-primary);
+  --color-danger-hover:     var(--coral-600);
+  --color-background:       var(--bg);
+  --color-foreground:       var(--ink);
+
+  /* Tipografía */
+  --font-sans:    var(--font-body);
+  --font-display: var(--font-display);
+  --font-mono:    ui-monospace, "SFMono-Regular", "Menlo", monospace;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+@theme {
+  --animate-stamp: stamp 0.42s cubic-bezier(0.22, 0.8, 0.2, 1) both;
+  --animate-blob: blob 7s infinite ease-in-out;
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font-body), system-ui, -apple-system, sans-serif;
 }
 
-/* Dialog modal entrance (see src/components/DialogProvider.tsx). Gated behind
-   motion-safe: in the markup, so reduced-motion users get no animation. */
+/* ── Fondo de la app: estadio nocturno detrás del color plano ────────────────
+   Una capa fija única (no hace scroll), detrás de todo (z-index -1). El color de
+   página (--bg) se superpone como velo (--bg-overlay): en oscuro deja ver el
+   estadio; en claro queda casi plano (la imagen es nocturna). Las superficies
+   (sidebar, cards, bottom-bar) siguen opacas → legibilidad intacta. Por eso los
+   roots de página son transparentes (sin bg-bg). */
+.app-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background-color: var(--bg);
+  background-image:
+    linear-gradient(var(--bg-overlay), var(--bg-overlay)),
+    url("/stadium-bg.jpg");
+  background-position: center;
+  background-size: cover;
+  background-repeat: no-repeat;
+}
+
+/* ── Utilidades figuritas ──────────────────────────────────────────────────
+   Bordes = afordancia de interacción, NO decoración. El borde aparece SÓLO en
+   botones/inputs/cards interactivos al hover/focus. Base con borde transparente
+   para reservar el espacio (sin salto de layout). En reposo, la separación sale
+   de los fills (bg / surface / surface-2). */
+.edge { border: 2px solid transparent; transition: border-color 0.15s ease; }
+.edge:hover,
+.edge:focus-visible { border-color: var(--edge, var(--accent)); }
+
+.tilt-l { rotate: -1.3deg; }
+.tilt-r { rotate: 1.3deg; }
+
+/* Trama de medios tonos (textura de impresión). */
+.halftone {
+  background-image: radial-gradient(
+    color-mix(in srgb, var(--ink) 16%, transparent) 1px,
+    transparent 1.6px
+  );
+  background-size: 8px 8px;
+}
+
+/* ── Keyframes ─────────────────────────────────────────────────────────────
+   Dialog modal (DialogProvider, gated motion-safe en el markup). */
 @keyframes fadeIn {
   from { opacity: 0; }
   to { opacity: 1; }
 }
-
 @keyframes popIn {
   from { opacity: 0; transform: translateY(8px) scale(0.97); }
   to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+/* "Sello": la figurita se estampa al guardar (decelera suave, sin rebote). */
+@keyframes stamp {
+  from { opacity: 0; transform: scale(0.82) rotate(-4deg); }
+  to { opacity: 1; transform: scale(1) rotate(0); }
+}
+
+/* Blobs del hero de auth/landing. */
+@keyframes blob {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  33% { transform: translate(24px, -32px) scale(1.08); }
+  66% { transform: translate(-18px, 18px) scale(0.94); }
+}
+.animation-delay-2000 { animation-delay: 2s; }
+.animation-delay-4000 { animation-delay: 4s; }
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-blob,
+  .animate-stamp { animation: none; }
 }

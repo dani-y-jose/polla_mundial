@@ -1,5 +1,10 @@
 "use client";
 
+// Panel de administración — migrado al design system (Fase 6d). Solo accesible
+// para usuarios con isAdmin. Layout enfocado (no usa la AppShell de tabs porque
+// admin no es una pestaña): cabecera + secciones en Cards sobre tokens.
+// La lógica (gating, auto-lock, config, crear/puntuar/eliminar) se conserva.
+
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { onAuthStateChanged } from "firebase/auth";
@@ -13,20 +18,9 @@ import { calculatePoints } from "@/lib/scoring";
 import { getMaxMembersPerGroup, DEFAULT_MAX_MEMBERS_PER_GROUP } from "@/lib/config";
 import { formatKickoffDateTime, toMs } from "@/lib/dates";
 import { useDialog } from "@/components/DialogProvider";
-
-const PHASE_TRANSLATIONS: Record<string, string> = {
-  group: "Fase de Grupos",
-  round_of_16: "Octavos de Final",
-  quarter_finals: "Cuartos de Final",
-  semi_finals: "Semifinales",
-  finals: "Gran Final"
-};
-
-const RESOLUTION_TRANSLATIONS: Record<string, string> = {
-  normal: "90 Minutos",
-  extra_time: "Tiempo Extra",
-  penalties: "Penales"
-};
+import { PHASE_TRANSLATIONS, RESOLUTION_TRANSLATIONS } from "@/lib/constants";
+import { Button, Input, Select, FormLabel, Card, Badge, Spinner } from "@/components/ui";
+import { PhaseLabel, MatchStatusBadge, PageHeader } from "@/components/domain";
 
 export default function AdminPage() {
   const [user, setUser] = useState<User | null>(null);
@@ -62,10 +56,10 @@ export default function AdminPage() {
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
       if (!currentUser) {
-        router.push("/login");
+        router.push("/");
         return;
       }
-      
+
       try {
         const userDoc = await getDoc(doc(db, "users", currentUser.uid));
         const u = parseDoc(userSchema, userDoc);
@@ -79,7 +73,7 @@ export default function AdminPage() {
         // Fetch Matches
         const matchesSnapshot = await getDocs(collection(db, "matches"));
         const matchesData = parseDocs(matchSchema, matchesSnapshot);
-        
+
         matchesData.sort((a, b) => {
           const timeA = toMs(a.kickoffTime);
           const timeB = toMs(b.kickoffTime);
@@ -287,7 +281,13 @@ export default function AdminPage() {
     }
   };
 
-  if (loading) return <div className="min-h-screen bg-black text-white flex items-center justify-center">Cargando...</div>;
+  if (loading) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-bg">
+        <Spinner size="lg" />
+      </div>
+    );
+  }
   if (!user) return null;
 
   // Accent-insensitive filter for the match list (so "mexico" matches "México").
@@ -298,128 +298,141 @@ export default function AdminPage() {
     : matches;
 
   return (
-    <div className="min-h-screen bg-black text-white p-8">
-      <div className="max-w-4xl mx-auto space-y-12">
-        <div className="flex justify-between items-center">
-          <h1 className="text-3xl font-bold">Panel de Administración</h1>
-          <button
-            onClick={() => router.push("/dashboard")}
-            className="inline-flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-semibold rounded-lg shadow-lg shadow-emerald-600/20 transition-colors shrink-0"
-          >
-            <span aria-hidden="true">←</span> Volver al Tablero
-          </button>
-        </div>
+    <div className="min-h-screen text-ink">
+      <div className="mx-auto max-w-4xl space-y-8 px-4 py-8 sm:px-6">
+        <PageHeader
+          title="Panel de administración"
+          subtitle="Partidos, marcadores y configuración del torneo."
+          action={
+            <Button variant="secondary" onClick={() => router.push("/dashboard")}>
+              <span aria-hidden="true">←</span> Volver al tablero
+            </Button>
+          }
+        />
 
-        {/* Global Config: Max members per group */}
-        <section className="bg-white/5 p-6 rounded-xl border border-white/10 flex flex-col md:flex-row justify-between md:items-end gap-4">
+        {/* Configuración global: máx. miembros por grupo */}
+        <Card padding="lg" className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
           <div className="flex-1">
-            <h2 className="text-xl font-semibold text-emerald-400">Configuración Global</h2>
-            <p className="text-xs text-gray-400 mt-1">
-              Máximo de miembros por grupo. Aplica a todos los grupos (las invitaciones nuevas usan este valor y los grupos no pueden superarlo). Solo los administradores pueden cambiarlo. Actual: <span className="font-bold text-white">{maxMembers}</span>.
+            <h2 className="font-display text-lg font-bold text-ink">Configuración global</h2>
+            <p className="mt-1 max-w-prose text-sm text-ink-muted">
+              Máximo de miembros por grupo. Aplica a todos los grupos (las invitaciones nuevas usan
+              este valor y los grupos no pueden superarlo). Actual:{" "}
+              <span className="font-bold text-ink">{maxMembers}</span>.
             </p>
           </div>
-          <div className="flex gap-3 items-end">
-            <div>
-              <label className="text-sm text-gray-400">Máx. miembros por grupo</label>
-              <input
+          <div className="flex items-end gap-3">
+            <div className="w-28">
+              <FormLabel variant="default" htmlFor="cfg-max">Máx. por grupo</FormLabel>
+              <Input
+                id="cfg-max"
                 type="number"
                 min="1"
                 value={maxMembersInput}
                 onChange={(e) => setMaxMembersInput(e.target.value)}
-                className="w-32 mt-1 px-3 py-2 bg-black/50 border border-white/10 rounded"
               />
             </div>
-            <div className="flex flex-col items-start gap-1">
-              <button
-                onClick={handleSaveMaxMembers}
-                disabled={configLoading}
-                className="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-black font-extrabold text-xs uppercase tracking-wider rounded-xl transition-all"
-              >
-                {configLoading ? "Guardando..." : "Guardar"}
-              </button>
-              {configSaved && <span className="text-xs text-emerald-400 font-bold">✓ Guardado</span>}
+            <div className="flex items-center gap-2">
+              <Button onClick={handleSaveMaxMembers} disabled={configLoading}>
+                {configLoading ? "Guardando…" : "Guardar"}
+              </Button>
+              {configSaved && <Badge tone="primary">✓ Guardado</Badge>}
             </div>
           </div>
-        </section>
+        </Card>
 
-        {/* Create Match Form */}
-        <section className="bg-white/5 p-6 rounded-xl border border-white/10">
-          <h2 className="text-xl font-semibold mb-6">Crear Nuevo Partido</h2>
-          <form onSubmit={handleCreateMatch} className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div><label className="text-sm text-gray-400">Equipo Local</label><input required value={homeTeam} onChange={e=>setHomeTeam(e.target.value)} className="w-full mt-1 px-3 py-2 bg-black/50 border border-white/10 rounded" /></div>
-            <div><label className="text-sm text-gray-400">Equipo Visitante</label><input required value={awayTeam} onChange={e=>setAwayTeam(e.target.value)} className="w-full mt-1 px-3 py-2 bg-black/50 border border-white/10 rounded" /></div>
-            <div><label className="text-sm text-gray-400">Hora de Inicio</label><input type="datetime-local" required value={kickoffTime} onChange={e=>setKickoffTime(e.target.value)} className="w-full mt-1 px-3 py-2 bg-black/50 border border-white/10 rounded" /></div>
-            <div><label className="text-sm text-gray-400">Fase</label>
-              <select value={phase} onChange={e=>setPhase(e.target.value as MatchPhase)} className="w-full mt-1 px-3 py-2 bg-black/50 border border-white/10 rounded">
-                <option value="group">Fase de Grupos</option>
-                <option value="round_of_16">Octavos de Final</option>
-                <option value="quarter_finals">Cuartos de Final</option>
-                <option value="semi_finals">Semifinales</option>
-                <option value="finals">Gran Final</option>
-              </select>
+        {/* Crear nuevo partido */}
+        <Card padding="lg">
+          <h2 className="mb-6 font-display text-lg font-bold text-ink">Crear nuevo partido</h2>
+          <form onSubmit={handleCreateMatch} className="grid grid-cols-1 gap-4 md:grid-cols-2">
+            <div><FormLabel variant="default" htmlFor="m-home">Equipo local</FormLabel><Input id="m-home" required value={homeTeam} onChange={e=>setHomeTeam(e.target.value)} /></div>
+            <div><FormLabel variant="default" htmlFor="m-away">Equipo visitante</FormLabel><Input id="m-away" required value={awayTeam} onChange={e=>setAwayTeam(e.target.value)} /></div>
+            <div><FormLabel variant="default" htmlFor="m-kick">Hora de inicio</FormLabel><Input id="m-kick" type="datetime-local" required value={kickoffTime} onChange={e=>setKickoffTime(e.target.value)} /></div>
+            <div><FormLabel variant="default" htmlFor="m-phase">Fase</FormLabel>
+              <Select id="m-phase" value={phase} onChange={e=>setPhase(e.target.value as MatchPhase)}>
+                {Object.entries(PHASE_TRANSLATIONS).map(([value, label]) => (
+                  <option key={value} value={value}>{label}</option>
+                ))}
+              </Select>
             </div>
-            <div><label className="text-sm text-gray-400">Ciudad</label><input required value={city} onChange={e=>setCity(e.target.value)} className="w-full mt-1 px-3 py-2 bg-black/50 border border-white/10 rounded" /></div>
-            <div><label className="text-sm text-gray-400">Estadio</label><input required value={stadiumName} onChange={e=>setStadiumName(e.target.value)} className="w-full mt-1 px-3 py-2 bg-black/50 border border-white/10 rounded" /></div>
-            <div><label className="text-sm text-gray-400">Nombre del Árbitro</label><input required value={refereeName} onChange={e=>setRefereeName(e.target.value)} className="w-full mt-1 px-3 py-2 bg-black/50 border border-white/10 rounded" /></div>
-            <div><label className="text-sm text-gray-400">País del Árbitro</label><input required value={refereeCountry} onChange={e=>setRefereeCountry(e.target.value)} className="w-full mt-1 px-3 py-2 bg-black/50 border border-white/10 rounded" /></div>
-            <div className="md:col-span-2 pt-4 flex items-center gap-3">
-              <button type="submit" disabled={createLoading} className="px-6 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 rounded font-medium">{createLoading ? "Agregando..." : "Agregar Partido"}</button>
-              {matchCreated && <span className="text-sm text-emerald-400 font-bold">✓ Partido creado con éxito</span>}
+            <div><FormLabel variant="default" htmlFor="m-city">Ciudad</FormLabel><Input id="m-city" required value={city} onChange={e=>setCity(e.target.value)} /></div>
+            <div><FormLabel variant="default" htmlFor="m-stadium">Estadio</FormLabel><Input id="m-stadium" required value={stadiumName} onChange={e=>setStadiumName(e.target.value)} /></div>
+            <div><FormLabel variant="default" htmlFor="m-ref">Nombre del árbitro</FormLabel><Input id="m-ref" required value={refereeName} onChange={e=>setRefereeName(e.target.value)} /></div>
+            <div><FormLabel variant="default" htmlFor="m-refc">País del árbitro</FormLabel><Input id="m-refc" required value={refereeCountry} onChange={e=>setRefereeCountry(e.target.value)} /></div>
+            <div className="flex items-center gap-3 pt-2 md:col-span-2">
+              <Button type="submit" disabled={createLoading}>{createLoading ? "Agregando…" : "Agregar partido"}</Button>
+              {matchCreated && <Badge tone="primary">✓ Partido creado</Badge>}
             </div>
           </form>
-        </section>
+        </Card>
 
-        {/* Manage Matches */}
-        <section>
-          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-6">
-            <h2 className="text-xl font-semibold">Gestionar Partidos</h2>
-            <input
-              type="search"
-              value={matchSearch}
-              onChange={e => setMatchSearch(e.target.value)}
-              placeholder="Buscar por equipo o ciudad..."
-              className="w-full sm:w-72 px-3 py-2 bg-black/50 border border-white/10 rounded text-sm focus:outline-none focus:ring-1 focus:ring-emerald-500"
-            />
+        {/* Gestionar partidos */}
+        <section className="space-y-4">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <h2 className="font-display text-lg font-bold text-ink">Gestionar partidos</h2>
+            <div className="w-full sm:w-72">
+              <Input
+                type="search"
+                value={matchSearch}
+                onChange={e => setMatchSearch(e.target.value)}
+                placeholder="Buscar por equipo o ciudad…"
+              />
+            </div>
           </div>
-          <div className="space-y-4">
-            {filteredMatches.length === 0 && (
-              <div className="text-sm text-gray-500 py-4">
+
+          {filteredMatches.length === 0 ? (
+            <Card padding="lg">
+              <p className="text-center text-sm text-ink-muted">
                 {matchSearch.trim()
                   ? `No hay partidos que coincidan con "${matchSearch}".`
-                  : "No hay partidos."}
-              </div>
-            )}
-            {filteredMatches.map(match => (
-              <div key={match.id} className="bg-white/5 p-6 rounded-xl border border-white/10 flex flex-col md:flex-row gap-6 items-center">
-                <div className="flex-1">
-                  <div className="text-sm text-emerald-400">{(PHASE_TRANSLATIONS[match.phase] || match.phase).toUpperCase()}</div>
-                  <div className="text-lg font-bold">{match.homeTeam} vs {match.awayTeam}</div>
-                  <div className="text-sm text-gray-400">{formatKickoffDateTime(match.kickoffTime)}</div>
-                </div>
-                
-                {match.status !== 'finished' ? (
-                  <MatchScoreUpdater match={match} onUpdate={handleUpdateScore} />
-                ) : (
-                  <div className="text-center px-6 py-3 bg-white/10 rounded-lg">
-                    <div className="text-xs text-gray-400 mb-1">RESULTADO FINAL</div>
-                    <div className="text-2xl font-bold">{match.homeScore} - {match.awayScore}</div>
-                    <div className="text-xs text-gray-500 mt-1">{match.resolutionMethod ? RESOLUTION_TRANSLATIONS[match.resolutionMethod] || match.resolutionMethod : ""}</div>
+                  : "No hay partidos todavía."}
+              </p>
+            </Card>
+          ) : (
+            <div className="space-y-3">
+              {filteredMatches.map(match => (
+                <Card key={match.id} padding="md" className="flex flex-col gap-4 lg:flex-row lg:items-center">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <PhaseLabel phase={match.phase} className="text-xs" />
+                      <MatchStatusBadge status={match.status} />
+                    </div>
+                    <div className="mt-1 truncate font-display text-base font-bold text-ink">
+                      {match.homeTeam} <span className="text-ink-faint">vs</span> {match.awayTeam}
+                    </div>
+                    <div className="text-sm text-ink-muted">{formatKickoffDateTime(match.kickoffTime)}</div>
                   </div>
-                )}
 
-                {/* Cascade-delete: removes the match and all its predictions.
-                    Kept visually separate from "Actualizar" to avoid mis-taps. */}
-                <button
-                  onClick={() => handleDeleteMatch(match)}
-                  disabled={deletingId === match.id}
-                  title="Eliminar partido y todos sus pronósticos"
-                  className="h-10 px-4 bg-red-600/20 hover:bg-red-600/40 text-red-300 border border-red-500/40 disabled:opacity-50 rounded text-sm font-medium shrink-0"
-                >
-                  {deletingId === match.id ? "Eliminando..." : "Eliminar"}
-                </button>
-              </div>
-            ))}
-          </div>
+                  {match.status !== "finished" ? (
+                    <MatchScoreUpdater match={match} onUpdate={handleUpdateScore} />
+                  ) : (
+                    <div className="flex items-center gap-3 rounded-xl bg-surface-2 px-4 py-3">
+                      <div className="text-2xl font-extrabold tabular-nums text-ink">
+                        {match.homeScore}<span className="px-1 text-ink-faint">–</span>{match.awayScore}
+                      </div>
+                      {match.resolutionMethod && match.resolutionMethod !== "normal" && (
+                        <Badge tone="neutral">
+                          {RESOLUTION_TRANSLATIONS[match.resolutionMethod] ?? match.resolutionMethod}
+                        </Badge>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Cascade-delete: removes the match and all its predictions.
+                      Kept visually separate from "Actualizar" to avoid mis-taps. */}
+                  <Button
+                    variant="danger"
+                    size="sm"
+                    onClick={() => handleDeleteMatch(match)}
+                    disabled={deletingId === match.id}
+                    title="Eliminar partido y todos sus pronósticos"
+                    className="shrink-0"
+                  >
+                    {deletingId === match.id ? "Eliminando…" : "Eliminar"}
+                  </Button>
+                </Card>
+              ))}
+            </div>
+          )}
         </section>
       </div>
     </div>
@@ -444,16 +457,22 @@ function MatchScoreUpdater({ match, onUpdate }: { match: Match, onUpdate: (id: s
   };
 
   return (
-    <div className="flex items-center gap-3 bg-black/40 p-4 rounded-lg border border-white/5">
-      <input type="number" min="0" value={hScore} onChange={e=>setHScore(e.target.value)} className="w-16 h-10 text-center bg-white/10 rounded" placeholder="L" />
-      <span>-</span>
-      <input type="number" min="0" value={aScore} onChange={e=>setAScore(e.target.value)} className="w-16 h-10 text-center bg-white/10 rounded" placeholder="V" />
-      <select value={res || "normal"} onChange={e=>setRes(e.target.value as ResolutionMethod)} className="h-10 px-2 bg-white/10 rounded text-sm max-w-[100px]">
-        <option value="normal">90 Minutos</option>
-        <option value="extra_time">Tiempo Extra</option>
-        <option value="penalties">Penales</option>
-      </select>
-      <button onClick={handleClick} disabled={saving} className="h-10 px-4 bg-purple-600 hover:bg-purple-500 disabled:opacity-50 rounded text-sm font-medium">{saving ? "Actualizando..." : "Actualizar"}</button>
+    <div className="flex flex-wrap items-center gap-2 rounded-xl bg-surface-2 p-3">
+      <div className="w-16">
+        <Input type="number" min="0" value={hScore} onChange={e=>setHScore(e.target.value)} className="text-center" placeholder="L" aria-label="Goles local" />
+      </div>
+      <span className="text-ink-faint">–</span>
+      <div className="w-16">
+        <Input type="number" min="0" value={aScore} onChange={e=>setAScore(e.target.value)} className="text-center" placeholder="V" aria-label="Goles visitante" />
+      </div>
+      <div className="w-[150px]">
+        <Select value={res || "normal"} onChange={e=>setRes(e.target.value as ResolutionMethod)}>
+          <option value="normal">90 minutos</option>
+          <option value="extra_time">Tiempo extra</option>
+          <option value="penalties">Penales</option>
+        </Select>
+      </div>
+      <Button size="sm" onClick={handleClick} disabled={saving}>{saving ? "Actualizando…" : "Actualizar"}</Button>
     </div>
   );
 }

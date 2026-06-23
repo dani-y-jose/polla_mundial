@@ -13,20 +13,8 @@ import { groupRulesInputSchema, prizeInputSchema, entryFeeSchema, firstError } f
 import { calculateGroupScores, getOutcome } from "@/lib/scoring";
 import { formatKickoffDateTime, toMs } from "@/lib/dates";
 import { useDialog } from "@/components/DialogProvider";
-
-const PHASE_TRANSLATIONS: Record<string, string> = {
-  group: "Fase de Grupos",
-  round_of_16: "Octavos de Final",
-  quarter_finals: "Cuartos de Final",
-  semi_finals: "Semifinales",
-  finals: "Gran Final"
-};
-
-const RESOLUTION_TRANSLATIONS: Record<string, string> = {
-  normal: "90 Minutos",
-  extra_time: "Tiempo Extra",
-  penalties: "Penales"
-};
+import { RESOLUTION_TRANSLATIONS, DEFAULT_GROUP_RULES } from "@/lib/constants";
+import { WhatsAppShareButton, RankBadge, PhaseLabel } from "@/components/domain";
 
 export default function GroupDetailPage() {
   const params = useParams();
@@ -90,7 +78,7 @@ export default function GroupDetailPage() {
 
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
       if (!currentUser) {
-        router.push("/login");
+        router.push("/");
         return;
       }
       setUser(currentUser);
@@ -159,15 +147,7 @@ export default function GroupDetailPage() {
         setAllPredictions(predsData);
 
         // 5. Calculate scores dynamically per group rules
-        const defaultRules = {
-          exactScorePoints: 3,
-          correctOutcomePoints: 1,
-          uniquePredictionPoints: 0,
-          quarterFinalsBonus: 0,
-          semiFinalsBonus: 0,
-          finalsBonus: 0
-        };
-        const activeRules = groupData.rules || defaultRules;
+        const activeRules = groupData.rules || DEFAULT_GROUP_RULES;
         const calculatedScores = calculateGroupScores(groupId, groupData.members, matchesData, predsData, activeRules);
         setGroupScores(calculatedScores);
 
@@ -295,6 +275,9 @@ export default function GroupDetailPage() {
     );
   }
 
+  // Shared WhatsApp invite copy (used by the invite card and the success modal).
+  const inviteShareMessage = `¡Únete a mi grupo de apuestas en La Polla Mundial 2026! ⚽🏆\n\nGrupo: *${group.name}*\nCódigo de Invitación: *${group.inviteCode}*\nInscripción: *${group.entryFee ? `$${group.entryFee.toLocaleString()}` : "Gratis"}*\n\nRegístrate e ingresa tus pronósticos aquí: ${typeof window !== "undefined" ? window.location.origin : ""}/?invite=${group.inviteCode}`;
+
   return (
     <div className="min-h-screen bg-black text-white p-8">
       <div className="max-w-5xl mx-auto space-y-12">
@@ -348,19 +331,7 @@ export default function GroupDetailPage() {
                   {copied ? "¡Copiado!" : "Copiar"}
                 </button>
               </div>
-              <a 
-                href={`https://api.whatsapp.com/send?text=${encodeURIComponent(
-                  `¡Únete a mi grupo de apuestas en La Polla Mundial 2026! ⚽🏆\n\nGrupo: *${group.name}*\nCódigo de Invitación: *${group.inviteCode}*\nInscripción: *${group.entryFee ? `$${group.entryFee.toLocaleString()}` : "Gratis"}*\n\nRegístrate e ingresa tus pronósticos aquí: ${typeof window !== 'undefined' ? window.location.origin : ''}/login?invite=${group.inviteCode}`
-                )}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="w-full py-2.5 bg-[#25D366] hover:bg-[#20ba56] text-black font-extrabold text-[11px] rounded-xl flex items-center justify-center gap-2 transition-all font-sans uppercase tracking-wider"
-              >
-                <svg className="w-4.5 h-4.5 fill-current" viewBox="0 0 24 24">
-                  <path d="M12.012 1.985c-5.522 0-10 4.478-10 10 0 1.772.463 3.518 1.342 5.062L2.012 22.015l5.127-1.342a9.92 9.92 0 0 0 4.873 1.28c5.522 0 10-4.478 10-10 0-5.522-4.478-10-10-10zm-.012 1.5c4.687 0 8.5 3.813 8.5 8.5s-3.813 8.5-8.5 8.5a8.423 8.423 0 0 1-4.14-1.09l-.297-.176-3.08.808.82-3.003-.193-.307A8.441 8.441 0 0 1 3.5 11.985c0-4.687 3.813-8.5 8.5-8.5zm-3.666 3.86a.916.916 0 0 0-.646.3c-.22.235-.58.643-.58 1.488s.614 1.666.7 1.784c.086.117 1.18 1.91 2.937 2.585.418.16.744.256.998.337.42.13.8.113 1.102.068.337-.05 1.037-.425 1.182-.835s.145-.765.1-.835c-.045-.07-.164-.117-.344-.207s-1.037-.512-1.197-.57-.275-.086-.39.085c-.117.17-.45.57-.55.683-.1.117-.2.13-.38.04-1.74-.87-2.316-1.782-2.52-2.13-.086-.152-.01-.235.066-.31.068-.068.152-.178.228-.266.075-.09.1-.152.152-.255a.35.35 0 0 0-.018-.344c-.045-.09-.39-.938-.535-1.287-.14-.34-.296-.29-.406-.296-.105-.005-.226-.005-.347-.005z"/>
-                </svg>
-                Compartir en WhatsApp
-              </a>
+              <WhatsAppShareButton message={inviteShareMessage} />
             </div>
           </div>
 
@@ -444,17 +415,6 @@ export default function GroupDetailPage() {
                 <tbody className="divide-y divide-white/5">
                   {members.map((member, index) => {
                     const rank = index + 1;
-                    
-                    // Podiums badges formatting
-                    let rankBadge = <span className="font-bold text-gray-400">{rank}</span>;
-                    if (rank === 1) {
-                      rankBadge = <span className="px-2.5 py-1 bg-yellow-500/20 border border-yellow-500/50 text-yellow-200 text-xs font-bold rounded-full">1º 🏆</span>;
-                    } else if (rank === 2) {
-                      rankBadge = <span className="px-2.5 py-1 bg-slate-300/20 border border-slate-300/50 text-slate-200 text-xs font-bold rounded-full">2º 🥈</span>;
-                    } else if (rank === 3) {
-                      rankBadge = <span className="px-2.5 py-1 bg-amber-700/20 border border-amber-600/50 text-amber-200 text-xs font-bold rounded-full">3º 🥉</span>;
-                    }
-
                     const isCurrentUser = member.uid === user?.uid;
 
                     return (
@@ -462,7 +422,7 @@ export default function GroupDetailPage() {
                         key={member.uid}
                         className={`hover:bg-white/10 transition-colors ${isCurrentUser ? 'bg-emerald-500/5 font-semibold text-emerald-300' : ''}`}
                       >
-                        <td className="px-6 py-4">{rankBadge}</td>
+                        <td className="px-6 py-4"><RankBadge rank={rank} variant="pill" /></td>
                         <td className="px-6 py-4">
                           <div>
                             {member.displayName} {isCurrentUser && <span className="text-xs text-emerald-400">(Tú)</span>}
@@ -504,7 +464,7 @@ export default function GroupDetailPage() {
                     {/* Match Overview Header */}
                     <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-white/5 pb-4">
                       <div>
-                        <span className="text-xs text-emerald-400 font-semibold tracking-wider uppercase">{(PHASE_TRANSLATIONS[match.phase] || match.phase).toUpperCase()}</span>
+                        <PhaseLabel phase={match.phase} className="text-xs" />
                         <div className="text-lg font-bold mt-0.5">{match.homeTeam} vs {match.awayTeam}</div>
                       </div>
                       <div className="text-right text-xs text-gray-400">
@@ -761,19 +721,7 @@ export default function GroupDetailPage() {
               </div>
 
               <div className="space-y-2 pt-2">
-                <a 
-                  href={`https://api.whatsapp.com/send?text=${encodeURIComponent(
-                    `¡Únete a mi grupo de apuestas en La Polla Mundial 2026! ⚽🏆\n\nGrupo: *${group.name}*\nCódigo de Invitación: *${group.inviteCode}*\nInscripción: *${group.entryFee ? `$${group.entryFee.toLocaleString()}` : "Gratis"}*\n\nRegístrate e ingresa tus pronósticos aquí: ${typeof window !== 'undefined' ? window.location.origin : ''}/login?invite=${group.inviteCode}`
-                  )}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="w-full py-2.5 bg-[#25D366] hover:bg-[#20ba56] text-black font-bold text-xs rounded-xl flex items-center justify-center gap-2 transition-all font-sans"
-                >
-                  <svg className="w-4.5 h-4.5 fill-current" viewBox="0 0 24 24">
-                    <path d="M12.012 1.985c-5.522 0-10 4.478-10 10 0 1.772.463 3.518 1.342 5.062L2.012 22.015l5.127-1.342a9.92 9.92 0 0 0 4.873 1.28c5.522 0 10-4.478 10-10 0-5.522-4.478-10-10-10zm-.012 1.5c4.687 0 8.5 3.813 8.5 8.5s-3.813 8.5-8.5 8.5a8.423 8.423 0 0 1-4.14-1.09l-.297-.176-3.08.808.82-3.003-.193-.307A8.441 8.441 0 0 1 3.5 11.985c0-4.687 3.813-8.5 8.5-8.5zm-3.666 3.86a.916.916 0 0 0-.646.3c-.22.235-.58.643-.58 1.488s.614 1.666.7 1.784c.086.117 1.18 1.91 2.937 2.585.418.16.744.256.998.337.42.13.8.113 1.102.068.337-.05 1.037-.425 1.182-.835s.145-.765.1-.835c-.045-.07-.164-.117-.344-.207s-1.037-.512-1.197-.57-.275-.086-.39.085c-.117.17-.45.57-.55.683-.1.117-.2.13-.38.04-1.74-.87-2.316-1.782-2.52-2.13-.086-.152-.01-.235.066-.31.068-.068.152-.178.228-.266.075-.09.1-.152.152-.255a.35.35 0 0 0-.018-.344c-.045-.09-.39-.938-.535-1.287-.14-.34-.296-.29-.406-.296-.105-.005-.226-.005-.347-.005z"/>
-                  </svg>
-                  Compartir en WhatsApp
-                </a>
+                <WhatsAppShareButton message={inviteShareMessage} />
                 
                 <button 
                   onClick={() => setShowSuccessModal(false)}

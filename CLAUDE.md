@@ -51,5 +51,5 @@ The heart of the app. Two functions:
 
 - Path alias `@/*` → `src/*`.
 - Mutations that touch multiple docs use `writeBatch`; live data uses `onSnapshot`.
-- Spanish UI strings and phase/resolution translation maps (`PHASE_TRANSLATIONS`, `RESOLUTION_TRANSLATIONS`) are duplicated across pages — keep them in sync if edited.
+- Phase/resolution translation maps (`PHASE_TRANSLATIONS`, `RESOLUTION_TRANSLATIONS`), the default group rules (`DEFAULT_GROUP_RULES`) and shared magic numbers live in [src/lib/constants.ts](src/lib/constants.ts) — import them, don't re-inline. Other Spanish UI strings are still duplicated per page.
 - `puppeteer-core` is a declared dependency but currently unused in `src/`.

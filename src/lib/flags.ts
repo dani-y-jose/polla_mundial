@@ -71,3 +71,25 @@ export function getFlag(team: string): string {
 export const WORLD_CUP_TEAMS = Object.keys(TEAM_FLAGS).sort((a, b) =>
   a.localeCompare(b, "es")
 );
+
+// Team → ISO 3166-1 alpha-2 (o subdivisión GB) para react-world-flags (banderas
+// SVG). Inglaterra/Escocia usan las subdivisiones GB-ENG / GB-SCT.
+export const TEAM_CODES: Record<string, string> = {
+  "México": "MX", "Sudáfrica": "ZA", "Corea del Sur": "KR", "Chequia": "CZ",
+  "Canadá": "CA", "Bosnia y Herzegovina": "BA", "Catar": "QA", "Suiza": "CH",
+  "Brasil": "BR", "Marruecos": "MA", "Haití": "HT", "Escocia": "GB-SCT",
+  "Estados Unidos": "US", "Paraguay": "PY", "Australia": "AU", "Turquía": "TR",
+  "Alemania": "DE", "Curazao": "CW", "Ecuador": "EC", "Costa de Marfil": "CI",
+  "Países Bajos": "NL", "Japón": "JP", "Suecia": "SE", "Túnez": "TN",
+  "Bélgica": "BE", "Egipto": "EG", "Irán": "IR", "Nueva Zelanda": "NZ",
+  "España": "ES", "Cabo Verde": "CV", "Arabia Saudita": "SA", "Uruguay": "UY",
+  "Francia": "FR", "Senegal": "SN", "Irak": "IQ", "Noruega": "NO",
+  "Argentina": "AR", "Argelia": "DZ", "Austria": "AT", "Jordania": "JO",
+  "Portugal": "PT", "R.D. Congo": "CD", "Uzbekistán": "UZ", "Colombia": "CO",
+  "Inglaterra": "GB-ENG", "Croacia": "HR", "Ghana": "GH", "Panamá": "PA",
+};
+
+// ISO code para react-world-flags; undefined para equipos sin país (placeholders).
+export function getFlagCode(team: string): string | undefined {
+  return TEAM_CODES[team];
+}

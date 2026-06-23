@@ -1,0 +1,38 @@
+// Domain (app-specific) components, composed from the ui primitives. Import from
+// "@/components/domain".
+export { TeamLabel } from "./TeamLabel";
+export type { TeamLabelProps } from "./TeamLabel";
+export { TeamFlag } from "./TeamFlag";
+export type { TeamFlagProps } from "./TeamFlag";
+export { MatchTeams } from "./MatchTeams";
+export type { MatchTeamsProps } from "./MatchTeams";
+export { PhaseLabel } from "./PhaseLabel";
+export type { PhaseLabelProps } from "./PhaseLabel";
+export { RankBadge } from "./RankBadge";
+export type { RankBadgeProps } from "./RankBadge";
+export { ScoreBadge } from "./ScoreBadge";
+export type { ScoreBadgeProps } from "./ScoreBadge";
+export { GroupSelector } from "./GroupSelector";
+export type { GroupSelectorProps } from "./GroupSelector";
+export { WhatsAppShareButton } from "./WhatsAppShareButton";
+export type { WhatsAppShareButtonProps } from "./WhatsAppShareButton";
+export { MatchStatusBadge } from "./MatchStatusBadge";
+export type { MatchStatusBadgeProps } from "./MatchStatusBadge";
+export { ScoreInput } from "./ScoreInput";
+export type { ScoreInputProps } from "./ScoreInput";
+export { PointsDisplay } from "./PointsDisplay";
+export type { PointsDisplayProps } from "./PointsDisplay";
+export { MatchCard } from "./MatchCard";
+export type { MatchCardProps } from "./MatchCard";
+export { LeaderboardRow } from "./LeaderboardRow";
+export type { LeaderboardRowProps } from "./LeaderboardRow";
+export { Leaderboard } from "./Leaderboard";
+export type { LeaderboardProps, LeaderboardEntry } from "./Leaderboard";
+export { GroupSummary } from "./GroupSummary";
+export type { GroupSummaryProps } from "./GroupSummary";
+export { MatchPredictionRow } from "./MatchPredictionRow";
+export type { MatchPredictionRowProps } from "./MatchPredictionRow";
+export { ChampionPick } from "./ChampionPick";
+export type { ChampionPickProps } from "./ChampionPick";
+export { PageHeader } from "./PageHeader";
+export type { PageHeaderProps } from "./PageHeader";
