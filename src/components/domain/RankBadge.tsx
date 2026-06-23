@@ -1,8 +1,8 @@
 import { cn } from "@/components/ui";
 
-// Indicador de puesto en la tabla. `pill` = chip del podio ("1º"); `circle` =
-// medallón numerado. Puestos 1-3 usan el metálico (oro/plata/bronce); del 4º en
-// adelante, neutro. El color metálico ES la medalla (sin emoji).
+// Indicador de puesto en la tabla. `pill` = chip (tabla densa); `circle` =
+// medallón numerado. Puestos 1-3 usan el metálico (oro/plata/bronce); del 4 en
+// adelante, neutro. El color metálico ES la medalla (sin emoji, sin "º").
 const PODIUM: Record<number, string> = {
   1: "bg-gold text-[#2e2200]",
   2: "bg-silver text-[#1b2226]",
@@ -28,7 +28,7 @@ export function RankBadge({ rank, variant = "circle", className }: RankBadgeProp
           className,
         )}
       >
-        {rank}º
+        {rank}
       </span>
     );
   }

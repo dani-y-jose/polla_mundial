@@ -1,4 +1,4 @@
-import { Card, Button, cn } from "@/components/ui";
+import { Card, Button, Badge, cn } from "@/components/ui";
 import type { MatchStatus } from "@/types";
 import { MatchTeams } from "./MatchTeams";
 import { PhaseLabel } from "./PhaseLabel";
@@ -9,12 +9,13 @@ import { ScoreBadge } from "./ScoreBadge";
 // Card de partido state-driven: según el estado del partido y la predicción del
 // usuario, renderiza el bloque correcto:
 //   • editable (abierto)      → ScoreInput + botón Guardar/Actualizar
-//   • cerrado (locked/en vivo)→ predicción del user en solo lectura
-//   • finalizado              → resultado real + tu predicción + ScoreBadge
-//   • abierto NO editable     → solo equipos (preview, p. ej. hero "Hoy")
+//   • no editable             → centro = resultado oficial (o "–", nunca la
+//                               predicción); abajo tu predicción si la tenés, y
+//                               si finalizó: ScoreBadge + sello "la dorada".
 // El header (fase + kickoff + estado) es común. `layout` controla los equipos
-// ("row" horizontal / "stacked" apilados). `footer` es contenido extra opcional
-// (CTA, estadio, etc.) debajo del cuerpo.
+// ("row" horizontal / "stacked" apilados, banderas más grandes). `footer` es
+// contenido extra opcional (CTA, estadio, etc.) debajo del cuerpo. Clavar el
+// marcador exacto ("la dorada") corona la card finalizada con un sello dorado.
 
 export type MatchScore = { home: number; away: number };
 export type PredictionScore = { home: number | null; away: number | null };
@@ -41,13 +42,21 @@ export type MatchCardProps = {
 
 function BigScore({ home, away }: MatchScore) {
   return (
-    <span className="font-display text-2xl font-extrabold tabular-nums leading-none text-ink">
-      {home} - {away}
+    <span className="font-display text-2xl sm:text-3xl font-extrabold tabular-nums leading-none whitespace-nowrap text-ink">
+      {home}
+      <span className="px-1 text-ink-faint">-</span>
+      {away}
     </span>
   );
 }
 
-const Vs = () => <span className="text-[11px] font-bold uppercase text-ink-faint">vs</span>;
+const Vs = () => <span className="text-[11px] font-bold uppercase tracking-wide text-ink-faint">vs</span>;
+
+const NoScore = () => (
+  <span className="font-display text-2xl sm:text-3xl font-extrabold leading-none text-ink-faint" aria-label="Sin resultado">
+    –
+  </span>
+);
 
 export function MatchCard({
   homeTeam,
@@ -100,35 +109,39 @@ export function MatchCard({
             {saving ? "Guardando…" : hasPrediction ? "Actualizar predicción" : "Guardar predicción"}
           </Button>
         </>
-      ) : finished ? (
-        <>
-          <MatchTeams
-            homeTeam={homeTeam}
-            awayTeam={awayTeam}
-            direction={layout}
-            center={result ? <BigScore home={result.home} away={result.away} /> : <Vs />}
-          />
-          <div className="flex items-center justify-between gap-2">
-            <span className="text-[11px] text-ink-muted">
-              {hasPrediction ? `Tu predicción: ${prediction!.home} - ${prediction!.away}` : "No predijiste"}
-              {resolutionLabel ? ` · ${resolutionLabel}` : ""}
-            </span>
-            <ScoreBadge points={pointsEarned ?? 0} exact={exactHit} />
-          </div>
-        </>
       ) : (
         <>
           <MatchTeams
             homeTeam={homeTeam}
             awayTeam={awayTeam}
             direction={layout}
-            center={hasPrediction ? <BigScore home={prediction!.home!} away={prediction!.away!} /> : <Vs />}
+            center={result ? <BigScore home={result.home} away={result.away} /> : <NoScore />}
           />
-          {status === "locked" && (
-            <p className="text-center text-[11px] text-ink-muted">
-              {hasPrediction ? "Tu predicción · cerrada" : "Predicciones cerradas"}
-            </p>
-          )}
+          {hasPrediction || finished ? (
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              {hasPrediction ? (
+                <span className="inline-flex items-center gap-2 rounded-lg bg-surface-2 px-3 py-1.5">
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-ink-muted">Tu pronóstico</span>
+                  <span className="font-display text-base font-extrabold tabular-nums leading-none text-ink">
+                    {prediction!.home}
+                    <span className="px-1 text-ink-faint">-</span>
+                    {prediction!.away}
+                  </span>
+                </span>
+              ) : (
+                <span className="text-[11px] font-medium text-ink-faint">No predijiste</span>
+              )}
+              {finished && (
+                <div className="flex shrink-0 items-center gap-1.5">
+                  {resolutionLabel && <span className="text-[10px] text-ink-faint">{resolutionLabel}</span>}
+                  {exactHit && <Badge tone="gold">✦ La dorada</Badge>}
+                  <ScoreBadge points={pointsEarned ?? 0} exact={exactHit} />
+                </div>
+              )}
+            </div>
+          ) : status === "locked" ? (
+            <p className="text-center text-[11px] text-ink-muted">Predicciones cerradas</p>
+          ) : null}
         </>
       )}
 

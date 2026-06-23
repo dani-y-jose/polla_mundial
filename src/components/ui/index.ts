@@ -20,3 +20,7 @@ export { Spinner } from "./Spinner";
 export type { SpinnerProps } from "./Spinner";
 export { EmptyState } from "./EmptyState";
 export type { EmptyStateProps } from "./EmptyState";
+export { Stepper } from "./Stepper";
+export type { StepperProps } from "./Stepper";
+export { CopyButton } from "./CopyButton";
+export type { CopyButtonProps } from "./CopyButton";
