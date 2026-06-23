@@ -28,7 +28,7 @@ function Stepper({
 }) {
   const v = value ?? 0;
   const btn =
-    "edge h-9 w-9 shrink-0 rounded-full bg-surface-2 text-ink text-xl font-bold leading-none flex items-center justify-center select-none disabled:opacity-40 disabled:cursor-not-allowed focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]";
+    "edge h-9 w-9 shrink-0 rounded-full bg-surface-2 text-[var(--accent)] text-xl font-bold leading-none flex items-center justify-center select-none disabled:opacity-40 disabled:cursor-not-allowed focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]";
   return (
     <div className="flex items-center gap-2">
       <button

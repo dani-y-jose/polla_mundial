@@ -1,29 +1,46 @@
 @import "tailwindcss";
 
 /* ══════════════════════════════════════════════════════════════════════════
-   POLLA MUNDIAL · Design tokens — MONOCROMO TEAL, invertido claro/oscuro.
+   POLLA MUNDIAL · Design tokens — MONOCROMO VIOLETA, invertido claro/oscuro.
    ──────────────────────────────────────────────────────────────────────────
-   Una sola paleta primaria (los hex EXACTOS del usuario). El tema se invierte:
-   claro = teal claro de fondo + tinta teal oscura; oscuro = al revés.
-   Los accents (danger/warning) son los ÚNICOS no-teal, sólo para estados.
+   Una sola paleta primaria (rampa derivada de las anclas EXACTAS del usuario:
+   200/500/950). El tema se invierte: claro = violeta claro de fondo + tinta
+   violeta oscura; oscuro = al revés. El accent (lime) y los estados funcionales
+   (danger/warning) son los ÚNICOS no-violeta.
    El tema lo maneja [data-theme] en <html> (lo resuelve el script anti-flash).
    ════════════════════════════════════════════════════════════════════════ */
 
 :root {
-  /* ── Paleta primaria — TEAL (hex exactos del usuario) ──────────────────── */
-  --teal-50:  #e5fffd;
-  --teal-100: #ccfffc;
-  --teal-200: #99fff8;
-  --teal-300: #66fff5;
-  --teal-400: #33fff1;
-  --teal-500: #00ffee;
-  --teal-600: #00ccbe;
-  --teal-700: #00998f;
-  --teal-800: #00665f;
-  --teal-900: #003330;
-  --teal-950: #002421;
+  /* ── Paleta primaria — VIOLETA (anclas 200/500/950 del usuario; resto
+     interpolado en RGB lineal, 50/100 aclarados hacia el blanco) ─────────── */
+  --violet-50:  #f3edfd;
+  --violet-100: #e7d8fa;
+  --violet-200: #bf99f2;   /* ancla */
+  --violet-300: #a56fdf;
+  --violet-400: #8c46cb;
+  --violet-500: #721cb8;   /* ancla */
+  --violet-600: #681ba8;
+  --violet-700: #5f1a98;
+  --violet-800: #551a89;
+  --violet-900: #4c1979;
+  --violet-950: #421869;   /* ancla */
 
-  /* ── Accents funcionales — únicos no-teal, sólo error/aviso ────────────── */
+  /* ── Compat: rampa "purple" (acción legacy) realiada a la nueva familia ── */
+  --purple-300: var(--violet-300);
+  --purple-400: var(--violet-400);
+  --purple-500: var(--violet-500);
+  --purple-600: var(--violet-600);
+  --purple-700: var(--violet-700);
+  --purple-800: var(--violet-800);
+  --purple-900: var(--violet-900);
+
+  /* ── Accent de marca — lime, el ÚNICO no-violeta del realce/foco.
+     Dos valores: brillante para oscuro; profundo (mismo tono) para claro,
+     donde el lime brillante no contrasta sobre las superficies violeta. ─── */
+  --lime-accent:      #9cf945;   /* oscuro */
+  --lime-accent-deep: #2c6207;   /* claro (AA sobre surface/surface-2) */
+
+  /* ── Accents funcionales — no-violeta, sólo error/aviso ────────────────── */
   --coral-400: #ff7a6b;
   --coral-500: #f2563f;
   --coral-600: #d83a23;
@@ -34,24 +51,24 @@
   /* ── Tokens semánticos — TEMA CLARO (default) ──────────────────────────── */
   color-scheme: light;
 
-  --bg:        var(--teal-200);   /* fondo de página (ancla) */
+  --bg:        var(--violet-200);   /* fondo de página (ancla) */
   --bg-overlay: color-mix(in srgb, var(--bg) 93%, transparent); /* velo sobre la imagen de fondo (claro = casi plano: la imagen es nocturna) */
-  --surface:   var(--teal-100);   /* capa +1 (card): más claro que el bg */
-  --surface-2: var(--teal-50);    /* capa +2 (elevado): lo más claro */
-  --ink:       var(--teal-950);   /* texto principal */
-  --ink-muted: var(--teal-800);   /* texto 2º (AA sobre superficies claras) */
-  --ink-faint: var(--teal-700);   /* hints */
-  --hairline:  color-mix(in srgb, var(--teal-900) 16%, transparent);
+  --surface:   var(--violet-100);   /* capa +1 (card): más claro que el bg */
+  --surface-2: var(--violet-50);    /* capa +2 (elevado): lo más claro */
+  --ink:       var(--violet-950);   /* texto principal */
+  --ink-muted: var(--violet-800);   /* texto 2º (AA sobre superficies claras) */
+  --ink-faint: var(--violet-700);   /* hints */
+  --hairline:  color-mix(in srgb, var(--violet-900) 16%, transparent);
 
-  --primary:        var(--teal-600);   /* relleno de acción */
-  --primary-strong: var(--teal-700);   /* hover/borde */
-  --on-primary:     var(--teal-950);   /* texto sobre primary */
-  --accent:         var(--teal-900);   /* destaque (raro) */
+  --primary:        var(--violet-600);  /* relleno de acción */
+  --primary-strong: var(--violet-700);  /* hover/borde */
+  --on-primary:     #ffffff;            /* texto sobre primary */
+  --accent:         var(--lime-accent-deep); /* realce / foco (lime profundo en claro) */
 
   --danger:  var(--coral-500);
   --warning: var(--orange-500);
 
-  /* Podio — colores metálicos representativos (medallas). Excepción al teal. */
+  /* Podio — colores metálicos representativos (medallas). Excepción al violeta. */
   --gold:   #e6b422;
   --silver: #9aa6af;
   --bronze: #c77b3b;
@@ -63,19 +80,19 @@
 :root[data-theme="dark"] {
   color-scheme: dark;
 
-  --bg:        var(--teal-950);
+  --bg:        var(--violet-950);
   --bg-overlay: color-mix(in srgb, var(--bg) 60%, transparent); /* velo sobre la imagen de fondo (oscuro = estadio visible) */
-  --surface:   var(--teal-900);
-  --surface-2: var(--teal-800);
-  --ink:       var(--teal-50);
-  --ink-muted: var(--teal-300);
-  --ink-faint: var(--teal-500);
-  --hairline:  color-mix(in srgb, var(--teal-200) 16%, transparent);
+  --surface:   var(--violet-900);
+  --surface-2: var(--violet-800);
+  --ink:       var(--violet-50);
+  --ink-muted: var(--violet-200);
+  --ink-faint: var(--violet-300);
+  --hairline:  color-mix(in srgb, var(--violet-200) 16%, transparent);
 
-  --primary:        var(--teal-500);
-  --primary-strong: var(--teal-400);
-  --on-primary:     var(--teal-950);
-  --accent:         var(--teal-600);
+  --primary:        var(--violet-500);  /* #721cb8 — pop sobre el fondo oscuro */
+  --primary-strong: var(--violet-400);  /* hover más claro */
+  --on-primary:     #ffffff;
+  --accent:         var(--lime-accent); /* realce / foco (lime) */
 
   --danger:  var(--coral-400);
   --warning: var(--orange-400);
@@ -86,7 +103,7 @@
   --bronze: #d98e4f;
 }
 
-/* ── Mapear a Tailwind (utilidades bg-bg / text-ink / bg-teal-500 / …). Inline
+/* ── Mapear a Tailwind (utilidades bg-bg / text-ink / bg-violet-500 / …). Inline
    para que resuelvan el var en el punto de uso y cambien con el tema. ─────── */
 @theme inline {
   --color-bg:         var(--bg);
@@ -104,22 +121,34 @@
   --color-silver:     var(--silver);
   --color-bronze:     var(--bronze);
 
-  /* Rampa teal completa → bg-teal-50 … bg-teal-950 */
-  --color-teal-50:  var(--teal-50);
-  --color-teal-100: var(--teal-100);
-  --color-teal-200: var(--teal-200);
-  --color-teal-300: var(--teal-300);
-  --color-teal-400: var(--teal-400);
-  --color-teal-500: var(--teal-500);
-  --color-teal-600: var(--teal-600);
-  --color-teal-700: var(--teal-700);
-  --color-teal-800: var(--teal-800);
-  --color-teal-900: var(--teal-900);
-  --color-teal-950: var(--teal-950);
+  /* Rampa violeta completa → bg-violet-50 … bg-violet-950 */
+  --color-violet-50:  var(--violet-50);
+  --color-violet-100: var(--violet-100);
+  --color-violet-200: var(--violet-200);
+  --color-violet-300: var(--violet-300);
+  --color-violet-400: var(--violet-400);
+  --color-violet-500: var(--violet-500);
+  --color-violet-600: var(--violet-600);
+  --color-violet-700: var(--violet-700);
+  --color-violet-800: var(--violet-800);
+  --color-violet-900: var(--violet-900);
+  --color-violet-950: var(--violet-950);
+
+  /* Accent lime (utilidad opcional) */
+  --color-lime-accent: var(--lime-accent);
+
+  /* Rampa purple completa → bg-purple-300 … bg-purple-900 */
+  --color-purple-300: var(--purple-300);
+  --color-purple-400: var(--purple-400);
+  --color-purple-500: var(--purple-500);
+  --color-purple-600: var(--purple-600);
+  --color-purple-700: var(--purple-700);
+  --color-purple-800: var(--purple-800);
+  --color-purple-900: var(--purple-900);
 
   /* Compat: el código viejo aún usa estos nombres */
   --color-primary-hover:    var(--primary-strong);
-  --color-primary-soft:     var(--accent);
+  --color-primary-soft:     color-mix(in srgb, var(--primary) 15%, transparent);
   --color-primary-contrast: var(--on-primary);
   --color-danger-hover:     var(--coral-600);
   --color-background:       var(--bg);

@@ -8,10 +8,7 @@ export type ButtonVariant = "primary" | "secondary" | "danger" | "ghost";
 export type ButtonSize = "sm" | "md" | "lg";
 
 const VARIANTS: Record<ButtonVariant, string> = {
-  // primary es el INVERSO de secondary: el texto de secondary (ink) pasa a ser
-  // el fondo, y el fondo de secondary (surface) pasa a ser el texto. El borde de
-  // hover usa una variante de primary (`--edge`), que sí contrasta sobre el fondo.
-  primary: "bg-ink text-surface hover:bg-[var(--ink-muted)] [--edge:var(--primary)]",
+  primary: "bg-primary text-[var(--on-primary)] hover:bg-[var(--primary-strong)]",
   secondary: "bg-surface text-ink hover:bg-surface-2",
   danger: "bg-danger text-white hover:bg-danger-hover",
   ghost: "bg-transparent text-ink-muted hover:text-ink hover:bg-surface",
