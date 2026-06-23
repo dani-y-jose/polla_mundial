@@ -35,6 +35,7 @@
   color-scheme: light;
 
   --bg:        var(--teal-200);   /* fondo de página (ancla) */
+  --bg-overlay: color-mix(in srgb, var(--bg) 93%, transparent); /* velo sobre la imagen de fondo (claro = casi plano: la imagen es nocturna) */
   --surface:   var(--teal-100);   /* capa +1 (card): más claro que el bg */
   --surface-2: var(--teal-50);    /* capa +2 (elevado): lo más claro */
   --ink:       var(--teal-950);   /* texto principal */
@@ -63,6 +64,7 @@
   color-scheme: dark;
 
   --bg:        var(--teal-950);
+  --bg-overlay: color-mix(in srgb, var(--bg) 60%, transparent); /* velo sobre la imagen de fondo (oscuro = estadio visible) */
   --surface:   var(--teal-900);
   --surface-2: var(--teal-800);
   --ink:       var(--teal-50);
@@ -138,6 +140,26 @@ body {
   background: var(--bg);
   color: var(--ink);
   font-family: var(--font-body), system-ui, -apple-system, sans-serif;
+}
+
+/* ── Fondo de la app: estadio nocturno detrás del color plano ────────────────
+   Una capa fija única (no hace scroll), detrás de todo (z-index -1). El color de
+   página (--bg) se superpone como velo (--bg-overlay): en oscuro deja ver el
+   estadio; en claro queda casi plano (la imagen es nocturna). Las superficies
+   (sidebar, cards, bottom-bar) siguen opacas → legibilidad intacta. Por eso los
+   roots de página son transparentes (sin bg-bg). */
+.app-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background-color: var(--bg);
+  background-image:
+    linear-gradient(var(--bg-overlay), var(--bg-overlay)),
+    url("/stadium-bg.jpg");
+  background-position: center;
+  background-size: cover;
+  background-repeat: no-repeat;
 }
 
 /* ── Utilidades figuritas ──────────────────────────────────────────────────

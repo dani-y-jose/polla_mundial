@@ -57,6 +57,9 @@ export default function RootLayout({
       suppressHydrationWarning
     >
       <body className="min-h-full flex flex-col">
+        {/* Fondo de la app (estadio nocturno + velo del color plano). Capa fija
+            detrás de todo; ver .app-backdrop en globals.css. */}
+        <div className="app-backdrop" aria-hidden="true" />
         {/* Anti-flash: fija data-theme/color-scheme antes de hidratar (sin
             parpadeo). beforeInteractive evita el warning de <script> en el árbol. */}
         <Script id="theme-init" strategy="beforeInteractive">
