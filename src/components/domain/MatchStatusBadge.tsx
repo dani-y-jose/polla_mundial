@@ -5,7 +5,7 @@ import type { MatchStatus } from "@/types";
 // Estado del partido como pill (lifecycle upcoming→locked→finished). `locked`
 // = post-kickoff (auto-lock), o sea EN VIVO, con punto pulsante.
 const MAP: Record<MatchStatus, { tone: BadgeTone; label: string }> = {
-  upcoming: { tone: "primary", label: "Próximo" },
+  upcoming: { tone: "accent", label: "Próximo" },
   locked: { tone: "danger", label: "En vivo" },
   finished: { tone: "neutral", label: "Final" },
 };

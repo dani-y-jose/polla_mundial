@@ -5,6 +5,7 @@ import { cn } from "./cn";
 // como una medalla. Sin borde (no es interactivo).
 export type BadgeTone =
   | "primary"
+  | "accent"
   | "danger"
   | "warning"
   | "neutral"
@@ -14,6 +15,7 @@ export type BadgeTone =
 
 const TONES: Record<BadgeTone, string> = {
   primary: "bg-primary/18 text-[var(--primary-strong)]",
+  accent: "bg-accent/18 text-[var(--accent)]",
   danger: "bg-danger/18 text-[var(--danger)]",
   warning: "bg-warning/20 text-[var(--warning)]",
   neutral: "bg-ink/8 text-ink-muted",

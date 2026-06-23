@@ -119,22 +119,22 @@ function ThemeToggle() {
 }
 
 // ── Color data ───────────────────────────────────────────────────────────────
-const TEAL_RAMP = [
-  { step: "50", hex: "#e5fffd" },
-  { step: "100", hex: "#ccfffc" },
-  { step: "200", hex: "#99fff8" },
-  { step: "300", hex: "#66fff5" },
-  { step: "400", hex: "#33fff1" },
-  { step: "500", hex: "#00ffee" },
-  { step: "600", hex: "#00ccbe" },
-  { step: "700", hex: "#00998f" },
-  { step: "800", hex: "#00665f" },
-  { step: "900", hex: "#003330" },
-  { step: "950", hex: "#002421" },
+const VIOLET_RAMP = [
+  { step: "50", hex: "#f3edfd" },
+  { step: "100", hex: "#e7d8fa" },
+  { step: "200", hex: "#bf99f2" },
+  { step: "300", hex: "#a56fdf" },
+  { step: "400", hex: "#8c46cb" },
+  { step: "500", hex: "#721cb8" },
+  { step: "600", hex: "#681ba8" },
+  { step: "700", hex: "#5f1a98" },
+  { step: "800", hex: "#551a89" },
+  { step: "900", hex: "#4c1979" },
+  { step: "950", hex: "#421869" },
 ];
 
 const ACCENTS: { v: string; l: string; s: string }[] = [
-  { v: "--accent", l: "accent", s: "destaque · teal 800/600" },
+  { v: "--accent", l: "accent", s: "realce · lime (osc #9cf945 / clr #2c6207)" },
   { v: "--danger", l: "danger", s: "error · coral" },
   { v: "--warning", l: "warning", s: "aviso · naranja" },
   { v: "--gold", l: "gold", s: "1º puesto" },
@@ -218,7 +218,7 @@ export default function DesignSystemPage() {
           <div>
             <h1 className="font-display text-4xl font-extrabold tracking-tight text-ink">Design System</h1>
             <p className="text-sm text-ink-muted">
-              Polla Mundial · monocromo teal <span className="text-ink-faint">(solo dev)</span>
+              Polla Mundial · monocromo violeta <span className="text-ink-faint">(solo dev)</span>
             </p>
           </div>
           <ThemeToggle />
@@ -249,20 +249,20 @@ export default function DesignSystemPage() {
             <>
               <section className="space-y-3">
                 <div>
-                  <h2 className="font-display text-xl font-bold text-ink">Primaria · Teal</h2>
+                  <h2 className="font-display text-xl font-bold text-ink">Primaria · Violeta</h2>
                   <p className="text-xs text-ink-muted">
-                    Tu paleta, hex exactos. Es la <strong className="font-bold text-ink">única familia</strong> — el tema se invierte para claro/oscuro.
+                    Anclas <strong className="font-bold text-ink">200 / 500 / 950</strong> exactas; el resto interpolado. Es la <strong className="font-bold text-ink">única familia</strong> — el tema se invierte para claro/oscuro.
                   </p>
                 </div>
                 <div className="overflow-hidden rounded-2xl border border-[var(--hairline)]">
                   <div className="flex">
-                    {TEAL_RAMP.map((t) => (
-                      <div key={t.step} className="h-20 flex-1" style={{ background: t.hex }} title={`teal-${t.step}`} />
+                    {VIOLET_RAMP.map((t) => (
+                      <div key={t.step} className="h-20 flex-1" style={{ background: t.hex }} title={`violet-${t.step}`} />
                     ))}
                   </div>
                 </div>
                 <div className="flex">
-                  {TEAL_RAMP.map((t) => (
+                  {VIOLET_RAMP.map((t) => (
                     <div key={t.step} className="flex-1 px-0.5 text-center">
                       <div className="text-[11px] font-bold text-ink">{t.step}</div>
                       <div className="text-[10px] font-mono text-ink-muted">{t.hex}</div>
@@ -275,7 +275,7 @@ export default function DesignSystemPage() {
                 <div>
                   <h2 className="font-display text-xl font-bold text-ink">Accents</h2>
                   <p className="text-xs text-ink-muted">
-                    Variantes que marcan contraste. Sólo <code className="font-mono text-danger">coral</code> (error) y <code className="font-mono text-warning">naranja</code> (aviso) son no-teal. El podio usa metálicos representativos.
+                    Variantes que marcan contraste. <code className="font-mono text-[var(--accent)]">lime</code> (realce), <code className="font-mono text-danger">coral</code> (error) y <code className="font-mono text-warning">naranja</code> (aviso) son no-violeta. El podio usa metálicos representativos.
                   </p>
                 </div>
                 <Grid>
