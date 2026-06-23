@@ -4,8 +4,9 @@
 // gallery of every primitive and domain component. 404s in production.
 //
 // Fase 6b: primitivos re-skineados desde tokens (regla de bordes `.edge`, sin
-// glassmorphism, podio metálico). Dominio aún con estilo viejo — se muestra en un
-// panel forzado a oscuro hasta su re-skin.
+// glassmorphism, podio metálico). Fase 6c: dominio re-skineado sobre tokens —
+// banderas tipo figurita (marco sticker, responsive), match cards y tabla con
+// jerarquía y deleite (sello "la dorada" al clavar el marcador exacto).
 
 import { useState, useEffect } from "react";
 import { notFound } from "next/navigation";
@@ -25,6 +26,7 @@ import {
 } from "@/components/ui";
 import {
   TeamLabel,
+  TeamFlag,
   MatchTeams,
   PhaseLabel,
   RankBadge,
@@ -36,9 +38,12 @@ import {
   PointsDisplay,
   MatchCard,
   LeaderboardRow,
+  MatchPredictionRow,
+  ChampionPick,
   PageHeader,
 } from "@/components/domain";
 import type { Group } from "@/types";
+import { WORLD_CUP_TEAMS } from "@/lib/flags";
 
 type Tab = "colores" | "tipografia" | "primitivos" | "dominio";
 
@@ -283,7 +288,7 @@ export default function DesignSystemPage() {
               <section className="space-y-4">
                 <div>
                   <h2 className="font-display text-xl font-bold text-ink">Tokens semánticos</h2>
-                  <p className="text-xs text-ink-muted">Probá el toggle de arriba — un token, dos temas (invertido).</p>
+                  <p className="text-xs text-ink-muted">Prueba el toggle de arriba — un token, dos temas (invertido).</p>
                 </div>
                 <Grid>
                   {SEMANTIC.map((t) => (
@@ -306,7 +311,7 @@ export default function DesignSystemPage() {
                   </div>
                   <div>
                     <p className="text-[11px] uppercase tracking-widest text-ink-muted mb-1">font-body · Hanken Grotesk</p>
-                    <p className="font-body text-xl text-ink">Predice los marcadores del Mundial 2026 y picate con tus amigos.</p>
+                    <p className="font-body text-xl text-ink">Predice los marcadores del Mundial 2026 y compite con tus amigos.</p>
                   </div>
                   <div>
                     <p className="text-[11px] uppercase tracking-widest text-ink-muted mb-1">
@@ -414,9 +419,26 @@ export default function DesignSystemPage() {
             </div>
           )}
 
-          {/* ── DOMINIO (estilo viejo, panel forzado a oscuro hasta su re-skin) ── */}
+          {/* ── DOMINIO (re-skineado sobre tokens · figuritas) ── */}
           {tab === "dominio" && (
             <div className="space-y-8">
+              <Demo title="TeamFlag · tamaños (figurita · responsive)">
+                {(["xs", "sm", "md", "lg", "xl"] as const).map((s) => (
+                  <div key={s} className="flex flex-col items-center gap-1.5">
+                    <TeamFlag team="Argentina" size={s} />
+                    <span className="font-mono text-[10px] text-ink-muted">{s}</span>
+                  </div>
+                ))}
+                <div className="flex flex-col items-center gap-1.5">
+                  <TeamFlag team="Japón" size="lg" />
+                  <span className="font-mono text-[10px] text-ink-muted">blanco</span>
+                </div>
+                <div className="flex flex-col items-center gap-1.5">
+                  <TeamFlag team="—" size="lg" />
+                  <span className="font-mono text-[10px] text-ink-muted">s/país</span>
+                </div>
+              </Demo>
+
               <Demo title="PhaseLabel">
                 <PhaseLabel phase="group" />
                 <PhaseLabel phase="round_of_16" />
@@ -466,7 +488,7 @@ export default function DesignSystemPage() {
 
               <Demo title="PointsDisplay · sizes">
                 <PointsDisplay value={128} label="puntos" />
-                <PointsDisplay value="3º" label="puesto" size="sm" />
+                <PointsDisplay value="3" label="puesto" size="sm" />
                 <PointsDisplay value={42} label="aciertos" size="lg" />
               </Demo>
 
@@ -509,8 +531,8 @@ export default function DesignSystemPage() {
                   homeTeam="Argentina"
                   awayTeam="Francia"
                   result={{ home: 3, away: 2 }}
-                  prediction={{ home: 3, away: 1 }}
-                  pointsEarned={1}
+                  prediction={{ home: 3, away: 2 }}
+                  pointsEarned={5}
                   resolutionLabel="Penales"
                 />
                 <MatchCard
@@ -525,12 +547,18 @@ export default function DesignSystemPage() {
                 <MatchCard
                   className="w-full"
                   layout="stacked"
+                  tilt
                   phase="group"
                   status="upcoming"
                   kickoffLabel="Hoy 21:00"
                   homeTeam="Argentina"
                   awayTeam="México"
-                  footer={<Button fullWidth size="sm" variant="secondary">Ir a pronósticos</Button>}
+                  footer={
+                    <div className="flex flex-col gap-2">
+                      <Button fullWidth size="sm">Cargar mi pronóstico</Button>
+                      <Button fullWidth size="sm" variant="ghost">Ver pronósticos del grupo</Button>
+                    </div>
+                  }
                 />
               </Demo>
 
@@ -542,8 +570,51 @@ export default function DesignSystemPage() {
                 </div>
                 <div className="w-full">
                   <LeaderboardRow variant="row" rank={4} name="Caro" points={98} />
-                  <LeaderboardRow variant="row" rank={5} name="Vos" points={95} you />
+                  <LeaderboardRow variant="row" rank={5} name="Tú" points={95} you />
                   <LeaderboardRow variant="row" rank={6} name="Tomi" points={88} />
+                </div>
+              </Demo>
+
+              <Demo title="MatchPredictionRow · pronósticos del grupo por partido">
+                <div className="w-full space-y-4">
+                  {/* Revelado — el partido terminó: marcador de cada quien + puntos */}
+                  <Card padding="sm" className="w-full">
+                    <div className="mb-2 flex items-center justify-between gap-2 px-1">
+                      <PhaseLabel phase="finals" />
+                      <MatchStatusBadge status="finished" />
+                    </div>
+                    <MatchTeams
+                      homeTeam="Argentina"
+                      awayTeam="Francia"
+                      center={<span className="font-display text-lg font-extrabold tabular-nums text-ink">3 - 2</span>}
+                    />
+                    <div className="mt-2">
+                      <MatchPredictionRow name="Marce" prediction={{ home: 3, away: 2 }} pointsEarned={5} exact />
+                      <MatchPredictionRow name="Tú" you prediction={{ home: 2, away: 1 }} pointsEarned={1} />
+                      <MatchPredictionRow name="Sofi" prediction={{ home: 0, away: 0 }} pointsEarned={0} />
+                      <MatchPredictionRow name="Caro" />
+                    </div>
+                  </Card>
+
+                  {/* Oculto — el partido aún no empieza: la regla esconde los pronósticos */}
+                  <Card padding="sm" className="w-full">
+                    <div className="mb-2 flex items-center justify-between gap-2 px-1">
+                      <PhaseLabel phase="group" />
+                      <MatchStatusBadge status="upcoming" />
+                    </div>
+                    <EmptyState icon="🔒" title="Pronósticos ocultos">
+                      Se revelan cuando empiece el partido.
+                    </EmptyState>
+                  </Card>
+                </div>
+              </Demo>
+
+              <Demo title="ChampionPick · tu campeón (alto compacto · ocupa el ancho del padre)">
+                <div className="grid w-full gap-3 sm:grid-cols-2">
+                  <ChampionPick champion="Brasil" teams={WORLD_CUP_TEAMS} deadlineLabel="4 de julio" onSave={() => {}} />
+                  <ChampionPick champion={null} teams={WORLD_CUP_TEAMS} deadlineLabel="4 de julio" onSave={() => {}} />
+                  <ChampionPick champion="Argentina" teams={WORLD_CUP_TEAMS} locked />
+                  <ChampionPick teams={WORLD_CUP_TEAMS} hint="Únete a un grupo para elegir tu campeón." />
                 </div>
               </Demo>
 

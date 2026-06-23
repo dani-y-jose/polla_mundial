@@ -78,7 +78,7 @@ export default function GroupDetailPage() {
 
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
       if (!currentUser) {
-        router.push("/login");
+        router.push("/");
         return;
       }
       setUser(currentUser);
@@ -276,7 +276,7 @@ export default function GroupDetailPage() {
   }
 
   // Shared WhatsApp invite copy (used by the invite card and the success modal).
-  const inviteShareMessage = `¡Únete a mi grupo de apuestas en La Polla Mundial 2026! ⚽🏆\n\nGrupo: *${group.name}*\nCódigo de Invitación: *${group.inviteCode}*\nInscripción: *${group.entryFee ? `$${group.entryFee.toLocaleString()}` : "Gratis"}*\n\nRegístrate e ingresa tus pronósticos aquí: ${typeof window !== "undefined" ? window.location.origin : ""}/login?invite=${group.inviteCode}`;
+  const inviteShareMessage = `¡Únete a mi grupo de apuestas en La Polla Mundial 2026! ⚽🏆\n\nGrupo: *${group.name}*\nCódigo de Invitación: *${group.inviteCode}*\nInscripción: *${group.entryFee ? `$${group.entryFee.toLocaleString()}` : "Gratis"}*\n\nRegístrate e ingresa tus pronósticos aquí: ${typeof window !== "undefined" ? window.location.origin : ""}/?invite=${group.inviteCode}`;
 
   return (
     <div className="min-h-screen bg-black text-white p-8">
