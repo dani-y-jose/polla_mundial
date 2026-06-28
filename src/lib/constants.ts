@@ -8,6 +8,7 @@ import type { GroupRules } from "@/types";
 // Callers use `PHASE_TRANSLATIONS[phase] || phase` to tolerate unknown phases.
 export const PHASE_TRANSLATIONS: Record<string, string> = {
   group: "Fase de Grupos",
+  round_of_32: "16avos de Final",
   round_of_16: "Octavos de Final",
   quarter_finals: "Cuartos de Final",
   semi_finals: "Semifinales",
