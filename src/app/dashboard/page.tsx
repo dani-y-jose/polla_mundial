@@ -775,6 +775,32 @@ export default function DashboardPage() {
             </Card>
           ) : (
             <>
+              {/* Explicación de puntuación para fases de eliminación (16avos+). */}
+              <Card padding="md" className="space-y-2 border border-accent/30 bg-accent/5">
+                <div className="flex items-center gap-2">
+                  <span aria-hidden className="text-base">ℹ️</span>
+                  <h3 className="font-display text-sm font-bold text-ink">Cómo puntúan las eliminatorias</h3>
+                </div>
+                <ul className="space-y-1.5 text-[13px] leading-snug text-ink-muted">
+                  <li className="flex gap-2">
+                    <span aria-hidden>⏱️</span>
+                    <span>
+                      El marcador y el ganador se cuentan{" "}
+                      <strong className="text-ink">hasta el minuto 120</strong> (con tiempo extra).
+                      Si termina en empate, ese empate es el que puntúa.
+                    </span>
+                  </li>
+                  <li className="flex gap-2">
+                    <span aria-hidden>🎯</span>
+                    <span>
+                      Acertar <strong className="text-ink">quién clasifica</strong> suma{" "}
+                      <strong className="text-ink">1 punto extra</strong>, solo si el partido se
+                      define por penales.
+                    </span>
+                  </li>
+                </ul>
+              </Card>
+
               <div className="flex items-center gap-2 rounded-xl border-2 border-transparent bg-surface-2 px-3 transition-colors hover:border-[var(--accent)] focus-within:border-[var(--accent)] focus-within:ring-2 focus-within:ring-[var(--accent)]">
                 <svg viewBox="0 0 24 24" className="h-4 w-4 shrink-0 text-ink-faint" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
                   <circle cx="11" cy="11" r="7" />
