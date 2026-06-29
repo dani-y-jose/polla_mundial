@@ -395,6 +395,7 @@ async function main() {
         refereeName: values.referee ?? "Por Definir",
         refereeCountry: "",
         resolutionMethod: null,
+        qualifier: null,
       };
       console.log(`${homeTeam} v ${awayTeam}  ${iso}  [${phase}, ${status}]  id=${id}`);
       if (!(await confirm("Create this match?", values.yes))) return;
@@ -470,6 +471,7 @@ async function main() {
           refereeName: "Por Definir",
           refereeCountry: "",
           resolutionMethod: null,
+          qualifier: null,
         };
         batch.set(db.collection("matches").doc(m.id), payload);
       }

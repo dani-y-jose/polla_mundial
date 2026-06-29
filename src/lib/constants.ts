@@ -33,6 +33,16 @@ export const DEFAULT_GROUP_RULES: GroupRules = {
   finalsBonus: 0,
 };
 
+// Fixed bonus for correctly predicting which team advances ("clasifica"),
+// awarded only when a knockout match was decided by penalties. Not a per-group
+// rule by design — see src/lib/scoring.ts.
+export const QUALIFIER_POINTS = 1;
+
+// Knockout matches (everything past the group stage) can't end in a draw, so
+// they carry the "clasifica" pick. Used by the dashboard (when to show the
+// qualifier toggle) and admin (when to ask which team advanced on penalties).
+export const isKnockoutPhase = (phase: string): boolean => phase !== "group";
+
 // A match counts as "starting soon" within this many minutes of kickoff
 // (drives the dashboard home-tab reminders).
 export const SOON_WINDOW_MIN = 60;

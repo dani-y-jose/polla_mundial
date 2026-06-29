@@ -45,6 +45,12 @@ service cloud.firestore {
       return s is int && s >= 0 && s <= 99;
     }
 
+    // A "clasifica" pick must be null (group stage / not picked) or one of the
+    // two sides. Mirrors the predictedQualifier enum in src/lib/schemas.ts.
+    function validQualifier(q) {
+      return q == null || q == 'home' || q == 'away';
+    }
+
     // Global, admin-configurable cap on members per group. Falls back to 100
     // when the /config/app doc has not been created yet. Kept in sync with
     // DEFAULT_MAX_MEMBERS_PER_GROUP in src/lib/config.ts.
@@ -139,6 +145,7 @@ service cloud.firestore {
         && request.resource.data.pointsEarned == null
         && validScore(request.resource.data.predictedHomeScore)
         && validScore(request.resource.data.predictedAwayScore)
+        && validQualifier(request.resource.data.get('predictedQualifier', null))
         && isGroupMember(request.resource.data.groupId)
         && matchOpen(request.resource.data.matchId);
 
@@ -154,6 +161,7 @@ service cloud.firestore {
         && request.resource.data.pointsEarned == resource.data.pointsEarned
         && validScore(request.resource.data.predictedHomeScore)
         && validScore(request.resource.data.predictedAwayScore)
+        && validQualifier(request.resource.data.get('predictedQualifier', null))
         && matchOpen(resource.data.matchId)
       );
 

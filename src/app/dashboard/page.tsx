@@ -17,7 +17,7 @@ import { getMatches } from "@/lib/matches";
 import { calculateGroupScores } from "@/lib/scoring";
 import { WORLD_CUP_TEAMS } from "@/lib/flags";
 import { isChampionLocked } from "@/lib/config";
-import { RESOLUTION_TRANSLATIONS, DEFAULT_GROUP_RULES } from "@/lib/constants";
+import { RESOLUTION_TRANSLATIONS, DEFAULT_GROUP_RULES, isKnockoutPhase } from "@/lib/constants";
 import { getActiveGroupId, setActiveGroupId } from "@/lib/active-group";
 import { enablePushNotifications, pushIsSupported } from "@/lib/messaging";
 import { toMs, formatKickoffDateTime } from "@/lib/dates";
@@ -130,7 +130,8 @@ export default function DashboardPage() {
   const [profileSaved, setProfileSaved] = useState(false);
 
   // Tab Pronósticos: borradores en edición + estado de guardado + filtros.
-  const [predDrafts, setPredDrafts] = useState<Record<string, { home: number | null; away: number | null }>>({});
+  // El borrador incluye `qualifier` (pick "clasifica") para partidos de eliminación.
+  const [predDrafts, setPredDrafts] = useState<Record<string, { home: number | null; away: number | null; qualifier: "home" | "away" | null }>>({});
   const [savingPred, setSavingPred] = useState<Record<string, boolean>>({});
   const [predStatus, setPredStatus] = useState<PredStatus>("abiertos");
   const [predPhase, setPredPhase] = useState<string>("all");
@@ -420,14 +421,20 @@ export default function DashboardPage() {
   }
 
   // Valor a mostrar/editar en el ScoreInput: borrador > guardado > vacío.
-  const predValue = (matchId: string): { home: number | null; away: number | null } => {
+  const predValue = (matchId: string): { home: number | null; away: number | null; qualifier: "home" | "away" | null } => {
     if (predDrafts[matchId]) return predDrafts[matchId];
     const saved = selectedGroup ? predictionsByGroup[selectedGroup.id]?.[matchId] : undefined;
-    return saved ? { home: saved.predictedHomeScore, away: saved.predictedAwayScore } : { home: null, away: null };
+    return saved
+      ? { home: saved.predictedHomeScore, away: saved.predictedAwayScore, qualifier: saved.predictedQualifier }
+      : { home: null, away: null, qualifier: null };
   };
 
+  // Score and qualifier edits each merge into the draft, preserving the other.
   const onPredChange = (matchId: string, next: { home: number; away: number }) =>
-    setPredDrafts((prev) => ({ ...prev, [matchId]: next }));
+    setPredDrafts((prev) => ({ ...prev, [matchId]: { ...predValue(matchId), ...next } }));
+
+  const onQualifierChange = (matchId: string, qualifier: "home" | "away") =>
+    setPredDrafts((prev) => ({ ...prev, [matchId]: { ...predValue(matchId), qualifier } }));
 
   async function savePrediction(matchId: string) {
     if (!user || !selectedGroup) return;
@@ -437,6 +444,10 @@ export default function DashboardPage() {
     if (val.home < 0 || val.home > 99 || val.away < 0 || val.away > 99) return;
     const m = matches.find((x) => x.id === matchId);
     if (!m || toMs(m.kickoffTime) <= Date.now() || m.status === "locked" || m.status === "finished") return;
+    // Knockout matches require a "clasifica" pick (the MatchCard Save button is
+    // already disabled until one is chosen; this guards the data layer too).
+    const knockout = isKnockoutPhase(m.phase);
+    if (knockout && !val.qualifier) return;
     setSavingPred((p) => ({ ...p, [matchId]: true }));
     try {
       const predId = `${user.uid}_${gid}_${matchId}`;
@@ -447,6 +458,7 @@ export default function DashboardPage() {
         matchId,
         predictedHomeScore: val.home,
         predictedAwayScore: val.away,
+        predictedQualifier: knockout ? val.qualifier : null,
         pointsEarned: null,
         timestamp: new Date(),
       };
@@ -886,6 +898,9 @@ export default function DashboardPage() {
                           saving={savingPred[m.id]}
                           onPredictionChange={(next) => onPredChange(m.id, next)}
                           onSave={() => savePrediction(m.id)}
+                          showQualifier={isKnockoutPhase(m.phase)}
+                          qualifier={predValue(m.id).qualifier}
+                          onQualifierChange={(q) => onQualifierChange(m.id, q)}
                         />
                       );
                     }
@@ -905,6 +920,9 @@ export default function DashboardPage() {
                         resolutionLabel={
                           m.status === "finished" && m.resolutionMethod ? RESOLUTION_TRANSLATIONS[m.resolutionMethod] : undefined
                         }
+                        showQualifier={isKnockoutPhase(m.phase)}
+                        qualifier={saved?.predictedQualifier ?? undefined}
+                        actualQualifier={m.qualifier ?? undefined}
                         footer={
                           <button
                             onClick={() => toggleGroupPreds(m.id)}

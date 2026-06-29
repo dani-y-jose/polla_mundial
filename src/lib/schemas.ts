@@ -133,6 +133,10 @@ export const matchSchema = z.object({
   refereeName: z.string().default(""),
   refereeCountry: z.string().default(""),
   resolutionMethod: resolutionMethodSchema,
+  // Which team advanced. Only meaningful for knockout matches decided by
+  // penalties (where the 120' score is a draw and the winner can't be derived
+  // from homeScore/awayScore). null otherwise. "home"/"away" mirrors getOutcome.
+  qualifier: z.enum(["home", "away"]).nullable().default(null),
   reminderSent: z.boolean().optional(),
 });
 export type Match = z.infer<typeof matchSchema>;
@@ -145,6 +149,10 @@ export const predictionSchema = z.object({
   matchId: z.string(),
   predictedHomeScore: z.number(),
   predictedAwayScore: z.number(),
+  // The user's "clasifica" pick for knockout matches: which team they think
+  // advances. Worth a fixed bonus (QUALIFIER_POINTS) only when the match was
+  // decided by penalties. null for group-stage predictions and legacy docs.
+  predictedQualifier: z.enum(["home", "away"]).nullable().default(null),
   pointsEarned: z.number().nullable(),
   timestamp: zTimestamp,
 });

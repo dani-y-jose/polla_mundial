@@ -19,6 +19,7 @@ import { ScoreBadge } from "./ScoreBadge";
 
 export type MatchScore = { home: number; away: number };
 export type PredictionScore = { home: number | null; away: number | null };
+export type Qualifier = "home" | "away";
 
 export type MatchCardProps = {
   homeTeam: string;
@@ -35,6 +36,13 @@ export type MatchCardProps = {
   onPredictionChange?: (next: MatchScore) => void;
   onSave?: () => void;
   saving?: boolean;
+  // "Clasifica" pick (knockout matches): which team the user thinks advances.
+  // When `showQualifier`, a required toggle is shown while editing; on a
+  // finished match the user's `qualifier` is compared against `actualQualifier`.
+  showQualifier?: boolean;
+  qualifier?: Qualifier | null;
+  onQualifierChange?: (next: Qualifier) => void;
+  actualQualifier?: Qualifier | null;
   footer?: React.ReactNode;
   tilt?: boolean;
   className?: string;
@@ -73,6 +81,10 @@ export function MatchCard({
   onPredictionChange,
   onSave,
   saving = false,
+  showQualifier = false,
+  qualifier,
+  onQualifierChange,
+  actualQualifier,
   footer,
   tilt,
   className,
@@ -82,6 +94,9 @@ export function MatchCard({
   const finished = status === "finished";
   const exactHit =
     hasPrediction && !!result && prediction!.home === result.home && prediction!.away === result.away;
+  // A knockout pick must be made before saving; the actual qualifier is only
+  // known once the match finished and went to penalties.
+  const needsQualifier = showQualifier && !qualifier;
 
   return (
     <Card padding="md" className={cn("space-y-3", tilt && "tilt-l", className)}>
@@ -105,7 +120,33 @@ export function MatchCard({
             onHomeChange={(h) => onPredictionChange?.({ home: h, away: prediction?.away ?? 0 })}
             onAwayChange={(a) => onPredictionChange?.({ home: prediction?.home ?? 0, away: a })}
           />
-          <Button fullWidth onClick={onSave} disabled={saving || !hasPrediction}>
+          {showQualifier && (
+            <div className="space-y-1.5">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-ink-muted">
+                ¿Quién clasifica?
+              </span>
+              <div className="grid grid-cols-2 gap-2">
+                {(["home", "away"] as const).map((side) => (
+                  <button
+                    key={side}
+                    type="button"
+                    disabled={saving}
+                    onClick={() => onQualifierChange?.(side)}
+                    aria-pressed={qualifier === side}
+                    className={cn(
+                      "truncate rounded-lg px-3 py-2 text-sm font-bold transition-colors",
+                      qualifier === side
+                        ? "bg-primary text-[var(--on-primary)]"
+                        : "bg-surface-2 text-ink-muted hover:text-ink",
+                    )}
+                  >
+                    {side === "home" ? homeTeam : awayTeam}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+          <Button fullWidth onClick={onSave} disabled={saving || !hasPrediction || needsQualifier}>
             {saving ? "Guardando…" : hasPrediction ? "Actualizar predicción" : "Guardar predicción"}
           </Button>
         </>
@@ -139,7 +180,26 @@ export function MatchCard({
                 </div>
               )}
             </div>
-          ) : status === "locked" ? (
+          ) : null}
+          {/* Clasifica outcome: only relevant once a knockout match was decided
+              by penalties (then `actualQualifier` is set). Shows whether the
+              user's pick advanced. */}
+          {finished && showQualifier && actualQualifier && (
+            <div className="flex flex-wrap items-center justify-between gap-2 text-[11px]">
+              <span className="text-ink-muted">
+                Clasificó:{" "}
+                <span className="font-bold text-ink">
+                  {actualQualifier === "home" ? homeTeam : awayTeam}
+                </span>
+              </span>
+              {qualifier && (
+                <span className={cn("font-bold", qualifier === actualQualifier ? "text-[var(--accent)]" : "text-ink-faint")}>
+                  {qualifier === actualQualifier ? "✓ Acertaste" : "✗ Fallaste"}
+                </span>
+              )}
+            </div>
+          )}
+          {!hasPrediction && !finished && status === "locked" ? (
             <p className="text-center text-[11px] text-ink-muted">Predicciones cerradas</p>
           ) : null}
         </>

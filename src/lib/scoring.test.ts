@@ -1,5 +1,6 @@
 import { calculatePoints, calculateGroupScores } from "./scoring";
 import { Match, Prediction, GroupRules } from "@/types";
+import { QUALIFIER_POINTS } from "@/lib/constants";
 
 function runTests() {
   console.log("Testing calculatePoints...");
@@ -53,7 +54,8 @@ function runTests() {
       stadiumName: "Hard Rock",
       refereeName: "Ref",
       refereeCountry: "US",
-      resolutionMethod: "normal"
+      resolutionMethod: "normal",
+      qualifier: null
     }
   ];
 
@@ -65,6 +67,7 @@ function runTests() {
       matchId: "match1",
       predictedHomeScore: 2,
       predictedAwayScore: 1, // Exact (5 pts) + Unique Score (10 pts) = 15 pts
+      predictedQualifier: null,
       pointsEarned: null,
       timestamp: dummyDate
     },
@@ -75,6 +78,7 @@ function runTests() {
       matchId: "match1",
       predictedHomeScore: 1,
       predictedAwayScore: 0, // Outcome (2 pts)
+      predictedQualifier: null,
       pointsEarned: null,
       timestamp: dummyDate
     },
@@ -85,6 +89,7 @@ function runTests() {
       matchId: "match1",
       predictedHomeScore: 0,
       predictedAwayScore: 3, // Wrong (0 pts)
+      predictedQualifier: null,
       pointsEarned: null,
       timestamp: dummyDate
     }
@@ -107,6 +112,7 @@ function runTests() {
       matchId: "match1",
       predictedHomeScore: 2,
       predictedAwayScore: 1, // exact, but in a different group -> ignored here
+      predictedQualifier: null,
       pointsEarned: null,
       timestamp: dummyDate
     }
@@ -124,6 +130,7 @@ function runTests() {
       matchId: "match1",
       predictedHomeScore: 2,
       predictedAwayScore: 1, // Exact (5 pts) (No unique since user2 also exact)
+      predictedQualifier: null,
       pointsEarned: null,
       timestamp: dummyDate
     },
@@ -134,6 +141,7 @@ function runTests() {
       matchId: "match1",
       predictedHomeScore: 2,
       predictedAwayScore: 1, // Exact (5 pts)
+      predictedQualifier: null,
       pointsEarned: null,
       timestamp: dummyDate
     }
@@ -158,7 +166,8 @@ function runTests() {
     stadiumName: "Stadium",
     refereeName: "Ref",
     refereeCountry: "US",
-    resolutionMethod: "normal"
+    resolutionMethod: "normal",
+    qualifier: null
   }));
 
   // user1 predicts correct outcome (2-0, exact) for all 8 matches
@@ -174,6 +183,7 @@ function runTests() {
       matchId: m.id,
       predictedHomeScore: 2,
       predictedAwayScore: 0, // Exact (5 pts * 8 = 40 pts)
+      predictedQualifier: null,
       pointsEarned: null,
       timestamp: dummyDate
     });
@@ -186,6 +196,7 @@ function runTests() {
       matchId: m.id,
       predictedHomeScore: idx === 7 ? 0 : 2, // predicted away win for match 7
       predictedAwayScore: idx === 7 ? 1 : 0,
+      predictedQualifier: null,
       pointsEarned: null,
       timestamp: dummyDate
     });
@@ -202,6 +213,110 @@ function runTests() {
 
   // user2 got 7 correct (7 * 5 = 35) and 1 wrong (0) = 35 points, no bonuses.
   console.assert(scoresC["user2"].totalPoints === 35, `user2 should have 35 pts, got ${scoresC["user2"].totalPoints}`);
+
+  console.log("Testing calculateGroupScores (knockout 'clasifica' qualifier bonus)...");
+
+  // Test Case D: Knockout match decided by penalties (120' draw 1-1, "home" advances).
+  // The score is judged at 120' (a draw), and a correct "clasifica" pick earns a
+  // fixed QUALIFIER_POINTS on top — only because resolutionMethod is "penalties".
+  const penaltyMatch: Match[] = [
+    {
+      id: "qf1",
+      homeTeam: "España",
+      awayTeam: "Francia",
+      kickoffTime: dummyDate,
+      status: "finished",
+      homeScore: 1,
+      awayScore: 1, // 120' draw
+      phase: "quarter_finals",
+      city: "City",
+      stadiumName: "Stadium",
+      refereeName: "Ref",
+      refereeCountry: "US",
+      resolutionMethod: "penalties",
+      qualifier: "home" // España advanced on penalties
+    }
+  ];
+
+  const predictionsD: Prediction[] = [
+    {
+      // Exact 120' draw + correct qualifier: 5 (exact) + 10 (unique, sole exact) + 1 (clasifica)
+      id: "pd1",
+      userId: "user1",
+      groupId: GROUP,
+      matchId: "qf1",
+      predictedHomeScore: 1,
+      predictedAwayScore: 1,
+      predictedQualifier: "home",
+      pointsEarned: null,
+      timestamp: dummyDate
+    },
+    {
+      // Correct outcome (a draw, 0-0) but WRONG qualifier: 2 (outcome) + 0 (clasifica)
+      id: "pd2",
+      userId: "user2",
+      groupId: GROUP,
+      matchId: "qf1",
+      predictedHomeScore: 0,
+      predictedAwayScore: 0,
+      predictedQualifier: "away",
+      pointsEarned: null,
+      timestamp: dummyDate
+    },
+    {
+      // Wrong outcome (home win) but correct qualifier: 0 (score) + 1 (clasifica)
+      id: "pd3",
+      userId: "user3",
+      groupId: GROUP,
+      matchId: "qf1",
+      predictedHomeScore: 2,
+      predictedAwayScore: 1,
+      predictedQualifier: "home",
+      pointsEarned: null,
+      timestamp: dummyDate
+    }
+  ];
+
+  const scoresD = calculateGroupScores(GROUP, members, penaltyMatch, predictionsD, rules);
+  console.assert(scoresD["user1"].totalPoints === 5 + 10 + QUALIFIER_POINTS, `user1 should have ${5 + 10 + QUALIFIER_POINTS} pts (exact + unique + clasifica), got ${scoresD["user1"].totalPoints}`);
+  console.assert(scoresD["user2"].totalPoints === 2, `user2 should have 2 pts (outcome, wrong qualifier), got ${scoresD["user2"].totalPoints}`);
+  console.assert(scoresD["user3"].totalPoints === QUALIFIER_POINTS, `user3 should have ${QUALIFIER_POINTS} pt (wrong score, correct qualifier), got ${scoresD["user3"].totalPoints}`);
+
+  // Test Case E: a knockout match NOT decided by penalties grants no qualifier
+  // bonus, even with a correct pick (the qualifier field stays null).
+  const normalKnockout: Match[] = [
+    {
+      id: "r32_1",
+      homeTeam: "Brasil",
+      awayTeam: "Chile",
+      kickoffTime: dummyDate,
+      status: "finished",
+      homeScore: 2,
+      awayScore: 0,
+      phase: "round_of_32",
+      city: "City",
+      stadiumName: "Stadium",
+      refereeName: "Ref",
+      refereeCountry: "US",
+      resolutionMethod: "normal",
+      qualifier: null
+    }
+  ];
+  const predictionsE: Prediction[] = [
+    {
+      id: "pe1",
+      userId: "user1",
+      groupId: GROUP,
+      matchId: "r32_1",
+      predictedHomeScore: 2,
+      predictedAwayScore: 0, // exact (5) + unique (10), NO clasifica bonus
+      predictedQualifier: "home",
+      pointsEarned: null,
+      timestamp: dummyDate
+    }
+  ];
+  const scoresE = calculateGroupScores(GROUP, members, normalKnockout, predictionsE, rules);
+  console.assert(scoresE["user1"].totalPoints === 15, `user1 should have 15 pts (exact + unique, no qualifier bonus on a non-penalty match), got ${scoresE["user1"].totalPoints}`);
 
   console.log("All scoring and group bonus tests passed successfully.");
 }

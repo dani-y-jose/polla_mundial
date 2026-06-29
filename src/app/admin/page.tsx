@@ -18,7 +18,7 @@ import { calculatePoints } from "@/lib/scoring";
 import { getMaxMembersPerGroup, DEFAULT_MAX_MEMBERS_PER_GROUP } from "@/lib/config";
 import { formatKickoffDateTime, toMs } from "@/lib/dates";
 import { useDialog } from "@/components/DialogProvider";
-import { PHASE_TRANSLATIONS, RESOLUTION_TRANSLATIONS } from "@/lib/constants";
+import { PHASE_TRANSLATIONS, RESOLUTION_TRANSLATIONS, QUALIFIER_POINTS, isKnockoutPhase } from "@/lib/constants";
 import { Button, Input, Select, FormLabel, Card, Badge, Spinner } from "@/components/ui";
 import { PhaseLabel, MatchStatusBadge, PageHeader } from "@/components/domain";
 
@@ -174,7 +174,8 @@ export default function AdminPage() {
         stadiumName,
         refereeName,
         refereeCountry,
-        resolutionMethod: null
+        resolutionMethod: null,
+        qualifier: null
       };
 
       await setDoc(doc(db, "matches", matchId), payload);
@@ -191,11 +192,15 @@ export default function AdminPage() {
     }
   };
 
-  const handleUpdateScore = async (matchId: string, homeScore: string, awayScore: string, resolutionMethod: ResolutionMethod) => {
+  const handleUpdateScore = async (matchId: string, homeScore: string, awayScore: string, resolutionMethod: ResolutionMethod, qualifier: Match["qualifier"]) => {
     const hScore = parseInt(homeScore, 10);
     const aScore = parseInt(awayScore, 10);
 
     if (isNaN(hScore) || isNaN(aScore)) return;
+
+    // The "clasifica" winner is only meaningful (and only scored) when the match
+    // was decided by penalties; clear it otherwise so a stale pick can't linger.
+    const finalQualifier = resolutionMethod === "penalties" ? qualifier : null;
 
     try {
       // 1. Update Match
@@ -204,7 +209,8 @@ export default function AdminPage() {
         homeScore: hScore,
         awayScore: aScore,
         status: "finished",
-        resolutionMethod
+        resolutionMethod,
+        qualifier: finalQualifier
       });
 
       // 2. Cache the fixed 3/1/0 points on each prediction for this match (used
@@ -218,7 +224,13 @@ export default function AdminPage() {
       predsSnapshot.forEach((predDoc) => {
         const predData = parseDoc(predictionSchema, predDoc);
         if (!predData) return;
-        const points = calculatePoints(predData.predictedHomeScore, predData.predictedAwayScore, hScore, aScore);
+        let points = calculatePoints(predData.predictedHomeScore, predData.predictedAwayScore, hScore, aScore);
+        // Mirror the leaderboard's "clasifica" bonus on the cached badge: the
+        // qualifier point is a fixed value (not per-group), so adding it here
+        // keeps the per-match badge exact for penalty-decided matches.
+        if (finalQualifier && predData.predictedQualifier === finalQualifier) {
+          points += QUALIFIER_POINTS;
+        }
 
         const pRef = doc(db, "predictions", predDoc.id);
         batch.update(pRef, { pointsEarned: points });
@@ -230,7 +242,7 @@ export default function AdminPage() {
       // onMatchScored Cloud Function, which fires on the status -> "finished"
       // write above and notifies exactly the users who predicted this match.
 
-      setMatches(matches.map(m => m.id === matchId ? { ...m, homeScore: hScore, awayScore: aScore, status: "finished", resolutionMethod } : m));
+      setMatches(matches.map(m => m.id === matchId ? { ...m, homeScore: hScore, awayScore: aScore, status: "finished", resolutionMethod, qualifier: finalQualifier } : m));
       await showAlert("¡Marcador actualizado y puntos recalculados!");
 
     } catch (err) {
@@ -414,6 +426,11 @@ export default function AdminPage() {
                           {RESOLUTION_TRANSLATIONS[match.resolutionMethod] ?? match.resolutionMethod}
                         </Badge>
                       )}
+                      {match.qualifier && (
+                        <Badge tone="accent">
+                          Clasifica: {match.qualifier === "home" ? match.homeTeam : match.awayTeam}
+                        </Badge>
+                      )}
                     </div>
                   )}
 
@@ -439,18 +456,23 @@ export default function AdminPage() {
   );
 }
 
-function MatchScoreUpdater({ match, onUpdate }: { match: Match, onUpdate: (id: string, hs: string, as: string, res: ResolutionMethod) => Promise<void> }) {
+function MatchScoreUpdater({ match, onUpdate }: { match: Match, onUpdate: (id: string, hs: string, as: string, res: ResolutionMethod, qualifier: Match["qualifier"]) => Promise<void> }) {
   const [hScore, setHScore] = useState(match.homeScore?.toString() || "");
   const [aScore, setAScore] = useState(match.awayScore?.toString() || "");
   const [res, setRes] = useState<ResolutionMethod>("normal");
+  const [qual, setQual] = useState<Match["qualifier"]>(match.qualifier ?? null);
   const [saving, setSaving] = useState(false);
+
+  // The "clasifica" winner is only needed when a knockout match goes to
+  // penalties (the 120' score is a draw, so the qualifier can't be derived).
+  const needsQualifier = isKnockoutPhase(match.phase) && res === "penalties";
 
   // Await the update so the button reflects the in-flight write (scoring + the
   // notification batch take a moment) and can't be double-fired.
   const handleClick = async () => {
     setSaving(true);
     try {
-      await onUpdate(match.id, hScore, aScore, res);
+      await onUpdate(match.id, hScore, aScore, res, qual);
     } finally {
       setSaving(false);
     }
@@ -472,7 +494,20 @@ function MatchScoreUpdater({ match, onUpdate }: { match: Match, onUpdate: (id: s
           <option value="penalties">Penales</option>
         </Select>
       </div>
-      <Button size="sm" onClick={handleClick} disabled={saving}>{saving ? "Actualizando…" : "Actualizar"}</Button>
+      {needsQualifier && (
+        <div className="w-[170px]">
+          <Select
+            value={qual ?? ""}
+            onChange={e=>setQual((e.target.value || null) as Match["qualifier"])}
+            aria-label="Equipo que clasifica"
+          >
+            <option value="">¿Quién clasifica?</option>
+            <option value="home">{match.homeTeam}</option>
+            <option value="away">{match.awayTeam}</option>
+          </Select>
+        </div>
+      )}
+      <Button size="sm" onClick={handleClick} disabled={saving || (needsQualifier && !qual)}>{saving ? "Actualizando…" : "Actualizar"}</Button>
     </div>
   );
 }

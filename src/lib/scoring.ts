@@ -1,4 +1,5 @@
 import { Match, Prediction, GroupRules } from "@/types";
+import { QUALIFIER_POINTS } from "@/lib/constants";
 
 /**
  * Calculates the points earned for a prediction based on the actual match score.
@@ -89,6 +90,15 @@ export function calculateGroupScores(
         scores[pred.userId].exactGuesses += 1;
       } else if (predOutcome === actualOutcome) {
         pts = rules.correctOutcomePoints;
+      }
+
+      // "Clasifica" bonus: a fixed QUALIFIER_POINTS for correctly predicting
+      // which team advanced, awarded ONLY when the match was decided by
+      // penalties (the 120' score is a draw, so the score-based outcome above
+      // can't reward picking the right qualifier).
+      if (match.resolutionMethod === 'penalties' && match.qualifier
+          && pred.predictedQualifier === match.qualifier) {
+        pts += QUALIFIER_POINTS;
       }
 
       scores[pred.userId].totalPoints += pts;
