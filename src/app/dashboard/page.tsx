@@ -57,6 +57,25 @@ const Brand = () => (
   </span>
 );
 
+// Ícono refresh (trazo, mismo estilo que la nav); gira mientras `spinning`.
+const RefreshIcon = ({ spinning }: { spinning?: boolean }) => (
+  <svg
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth={1.9}
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    className={cn("h-4 w-4", spinning && "motion-safe:animate-spin")}
+    aria-hidden
+  >
+    <path d="M23 4v6h-6" />
+    <path d="M1 20v-6h6" />
+    <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10" />
+    <path d="M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
+  </svg>
+);
+
 const Section = ({ title, live, children }: { title: string; live?: boolean; children: React.ReactNode }) => (
   <section className="space-y-3">
     <h2 className="flex items-center gap-2 font-display text-base font-bold text-ink">
@@ -142,6 +161,8 @@ export default function DashboardPage() {
   // timer: guardar varias seguidas reinicia el auto-cierre, no lo corta.
   const [toast, setToast] = useState<{ tone: "success" | "error"; msg: string } | null>(null);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Botón "Actualizar tabla": re-lee el doc del grupo (miembros + reglas).
+  const [refreshing, setRefreshing] = useState(false);
   const [predStatus, setPredStatus] = useState<PredStatus>("abiertos");
   const [predPhase, setPredPhase] = useState<string>("all");
   const [predLetter, setPredLetter] = useState<string>("all");
@@ -291,28 +312,56 @@ export default function DashboardPage() {
     };
   }, [user]);
 
-  // Pronósticos del grupo activo + nombres de integrantes (para "En vivo").
+  // Pronósticos de TODO el grupo activo, VIVOS (para la tabla y "En vivo"): un
+  // onSnapshot mantiene groupPreds fresco cuando cualquier integrante carga o
+  // cambia un pronóstico, así la tabla no queda con una foto vieja. Unsub en un
+  // ref para desmontarlo antes de signOut (evita permission-denied). Se
+  // re-suscribe solo al cambiar de grupo (clave = id), no al refrescar el doc.
+  const selectedGroupId = selectedGroup?.id;
+  const groupPredsUnsubRef = useRef<(() => void) | null>(null);
   useEffect(() => {
-    if (!selectedGroup) {
-      setGroupPreds({});
+    // Sin grupo no adjuntamos listener; groupPreds se limpia en el efecto de
+    // nombres (corre en el mismo cambio de selectedGroup). Al cambiar de grupo,
+    // el nuevo onSnapshot reemplaza groupPreds al instante (cache).
+    if (!selectedGroupId) return;
+    const unsub = onSnapshot(
+      query(collection(db, "predictions"), where("groupId", "==", selectedGroupId)),
+      (snap) => {
+        const byMatch: Record<string, Record<string, Prediction>> = {};
+        parseDocs(predictionSchema, snap).forEach((p) => {
+          (byMatch[p.matchId] ??= {})[p.userId] = p;
+        });
+        setGroupPreds(byMatch);
+      },
+      (err) => {
+        if ((err as { code?: string }).code === "permission-denied") return;
+        console.error("Error al escuchar pronósticos del grupo:", err);
+      },
+    );
+    groupPredsUnsubRef.current = unsub;
+    return () => {
+      unsub();
+      groupPredsUnsubRef.current = null;
+    };
+  }, [selectedGroupId]);
+
+  // Nombres de integrantes (para la tabla y "En vivo"). Lectura puntual: cambian
+  // poco; se recargan al cambiar de grupo o al tocar "Actualizar" (que re-lee el
+  // doc del grupo → nuevo selectedGroup → este efecto corre de nuevo).
+  useEffect(() => {
+    const members = selectedGroup?.members;
+    if (!members || members.length === 0) {
       setMemberNames({});
+      setGroupPreds({});
       return;
     }
     let cancelled = false;
     (async () => {
       try {
-        const [predsSnap, memberDocs] = await Promise.all([
-          getDocs(query(collection(db, "predictions"), where("groupId", "==", selectedGroup.id))),
-          Promise.all(selectedGroup.members.map((uid) => getDoc(doc(db, "users", uid)))),
-        ]);
+        const docs = await Promise.all(members.map((uid) => getDoc(doc(db, "users", uid))));
         if (cancelled) return;
-        const byMatch: Record<string, Record<string, Prediction>> = {};
-        parseDocs(predictionSchema, predsSnap).forEach((p) => {
-          (byMatch[p.matchId] ??= {})[p.userId] = p;
-        });
-        setGroupPreds(byMatch);
         const names: Record<string, string> = {};
-        memberDocs.forEach((d) => {
+        docs.forEach((d) => {
           const u = parseDoc(userSchema, d);
           names[d.id] = u?.displayName || "—";
         });
@@ -367,15 +416,39 @@ export default function DashboardPage() {
   };
 
   async function handleSignOut() {
-    // Desmontar los listeners (notificaciones + partidos) ANTES de revocar el
-    // token, para evitar el "permission-denied" que dispara Firestore si siguen
-    // adjuntos.
+    // Desmontar los listeners (notificaciones + partidos + pronósticos del
+    // grupo) ANTES de revocar el token, para evitar el "permission-denied" que
+    // dispara Firestore si siguen adjuntos.
     notifUnsubRef.current?.();
     notifUnsubRef.current = null;
     matchesUnsubRef.current?.();
     matchesUnsubRef.current = null;
+    groupPredsUnsubRef.current?.();
+    groupPredsUnsubRef.current = null;
     await signOut(auth);
     router.replace("/");
+  }
+
+  // "Actualizar tabla": re-lee el doc del grupo (miembros + reglas). Los
+  // pronósticos ya son vivos (onSnapshot); refrescar selectedGroup dispara la
+  // recarga de nombres y recalcula la tabla. Feedback con toast.
+  async function refreshTable() {
+    if (!selectedGroup) return;
+    setRefreshing(true);
+    try {
+      const snap = await getDoc(doc(db, "groups", selectedGroup.id));
+      const fresh = parseDoc(groupSchema, snap);
+      if (fresh) {
+        setSelectedGroup(fresh);
+        setGroups((prev) => prev.map((g) => (g.id === fresh.id ? fresh : g)));
+      }
+      showToast("success", "Tabla actualizada");
+    } catch (err) {
+      console.error(err);
+      showToast("error", "No se pudo actualizar. Revisa tu conexión.");
+    } finally {
+      setRefreshing(false);
+    }
   }
 
   const handleEnablePush = async () => {
@@ -1026,6 +1099,14 @@ export default function DashboardPage() {
         <div className="space-y-5">
           <PageHeader
             title={hasResults && myRank > 0 ? `¡${rankPhrase(myRank, standings.length)}, ${firstName}!` : "Tabla"}
+            action={
+              selectedGroup ? (
+                <Button variant="secondary" size="sm" onClick={refreshTable} disabled={refreshing}>
+                  <RefreshIcon spinning={refreshing} />
+                  {refreshing ? "Actualizando…" : "Actualizar"}
+                </Button>
+              ) : undefined
+            }
             subtitle={
               !hasGroups ? (
                 "Sin grupo"
