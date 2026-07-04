@@ -12,6 +12,8 @@ export { Badge } from "./Badge";
 export type { BadgeProps, BadgeTone } from "./Badge";
 export { AlertBanner } from "./AlertBanner";
 export type { AlertBannerProps, AlertTone } from "./AlertBanner";
+export { Toast } from "./Toast";
+export type { ToastProps, ToastTone } from "./Toast";
 export { FilterPill } from "./FilterPill";
 export type { FilterPillProps, FilterPillAccent } from "./FilterPill";
 export { FormLabel } from "./FormLabel";

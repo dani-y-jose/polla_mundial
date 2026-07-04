@@ -36,3 +36,4 @@ export { ChampionPick } from "./ChampionPick";
 export type { ChampionPickProps } from "./ChampionPick";
 export { PageHeader } from "./PageHeader";
 export type { PageHeaderProps } from "./PageHeader";
+export { KnockoutScoringCard } from "./KnockoutScoringCard";

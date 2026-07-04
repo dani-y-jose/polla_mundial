@@ -36,6 +36,11 @@ export type MatchCardProps = {
   onPredictionChange?: (next: MatchScore) => void;
   onSave?: () => void;
   saving?: boolean;
+  // Feedback transitorio post-guardado (lo maneja el padre): confirmación de
+  // éxito y/o mensaje de error, mostrados bajo el botón Guardar. Acompaña al
+  // toast global con una marca en la propia card.
+  justSaved?: boolean;
+  error?: string | null;
   // "Clasifica" pick (knockout matches): which team the user thinks advances.
   // When `showQualifier`, a required toggle is shown while editing; on a
   // finished match the user's `qualifier` is compared against `actualQualifier`.
@@ -81,6 +86,8 @@ export function MatchCard({
   onPredictionChange,
   onSave,
   saving = false,
+  justSaved = false,
+  error,
   showQualifier = false,
   qualifier,
   onQualifierChange,
@@ -149,6 +156,18 @@ export function MatchCard({
           <Button fullWidth onClick={onSave} disabled={saving || !hasPrediction || needsQualifier}>
             {saving ? "Guardando…" : hasPrediction ? "Actualizar predicción" : "Guardar predicción"}
           </Button>
+          {error ? (
+            <p className="text-center text-[11px] font-medium text-danger" role="alert">
+              {error}
+            </p>
+          ) : justSaved ? (
+            <p
+              className="flex items-center justify-center gap-1 text-[11px] font-bold text-[var(--accent)] motion-safe:animate-[fadeIn_180ms_ease-out]"
+              role="status"
+            >
+              ✓ Predicción guardada
+            </p>
+          ) : null}
         </>
       ) : (
         <>

@@ -22,7 +22,7 @@ import { getActiveGroupId, setActiveGroupId } from "@/lib/active-group";
 import { enablePushNotifications, pushIsSupported } from "@/lib/messaging";
 import { toMs, formatKickoffDateTime } from "@/lib/dates";
 import type { User, Group, Match, Prediction } from "@/types";
-import { Button, Card, Input, FormLabel, AlertBanner, Badge, Spinner, EmptyState, Select, cn } from "@/components/ui";
+import { Button, Card, Input, FormLabel, AlertBanner, Badge, Spinner, EmptyState, Select, Toast, cn } from "@/components/ui";
 import {
   GroupSelector,
   MatchCard,
@@ -34,6 +34,7 @@ import {
   ChampionPick,
   Leaderboard,
   GroupSummary,
+  KnockoutScoringCard,
 } from "@/components/domain";
 import {
   AppShell,
@@ -133,6 +134,14 @@ export default function DashboardPage() {
   // El borrador incluye `qualifier` (pick "clasifica") para partidos de eliminación.
   const [predDrafts, setPredDrafts] = useState<Record<string, { home: number | null; away: number | null; qualifier: "home" | "away" | null }>>({});
   const [savingPred, setSavingPred] = useState<Record<string, boolean>>({});
+  // Marca inline por partido (bajo el botón de la card): flash de éxito que se
+  // auto-oculta, y error que persiste hasta el siguiente intento.
+  const [savedPred, setSavedPred] = useState<Record<string, boolean>>({});
+  const [predError, setPredError] = useState<Record<string, string | null>>({});
+  // Toast global de feedback al guardar/actualizar una predicción. Un solo
+  // timer: guardar varias seguidas reinicia el auto-cierre, no lo corta.
+  const [toast, setToast] = useState<{ tone: "success" | "error"; msg: string } | null>(null);
+  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [predStatus, setPredStatus] = useState<PredStatus>("abiertos");
   const [predPhase, setPredPhase] = useState<string>("all");
   const [predLetter, setPredLetter] = useState<string>("all");
@@ -436,6 +445,13 @@ export default function DashboardPage() {
   const onQualifierChange = (matchId: string, qualifier: "home" | "away") =>
     setPredDrafts((prev) => ({ ...prev, [matchId]: { ...predValue(matchId), qualifier } }));
 
+  // Muestra el toast y (re)programa su auto-cierre a los 3s.
+  function showToast(tone: "success" | "error", msg: string) {
+    setToast({ tone, msg });
+    if (toastTimer.current) clearTimeout(toastTimer.current);
+    toastTimer.current = setTimeout(() => setToast(null), 3000);
+  }
+
   async function savePrediction(matchId: string) {
     if (!user || !selectedGroup) return;
     const gid = selectedGroup.id;
@@ -449,6 +465,7 @@ export default function DashboardPage() {
     const knockout = isKnockoutPhase(m.phase);
     if (knockout && !val.qualifier) return;
     setSavingPred((p) => ({ ...p, [matchId]: true }));
+    setPredError((p) => ({ ...p, [matchId]: null }));
     try {
       const predId = `${user.uid}_${gid}_${matchId}`;
       const payload: Prediction = {
@@ -469,8 +486,17 @@ export default function DashboardPage() {
         delete n[matchId];
         return n;
       });
+      // Confirmación doble: toast flotante prominente + marca inline en la card.
+      showToast("success", "Predicción guardada");
+      setSavedPred((p) => ({ ...p, [matchId]: true }));
+      setTimeout(() => setSavedPred((p) => ({ ...p, [matchId]: false })), 2500);
     } catch (err) {
       console.error(err);
+      showToast("error", "No se pudo guardar. Revisa tu conexión.");
+      setPredError((p) => ({
+        ...p,
+        [matchId]: "No se pudo guardar tu predicción. Revisa tu conexión e inténtalo de nuevo.",
+      }));
     } finally {
       setSavingPred((p) => ({ ...p, [matchId]: false }));
     }
@@ -652,6 +678,7 @@ export default function DashboardPage() {
   };
 
   return (
+    <>
     <AppShell
       items={nav}
       activeKey={tab}
@@ -776,30 +803,7 @@ export default function DashboardPage() {
           ) : (
             <>
               {/* Explicación de puntuación para fases de eliminación (16avos+). */}
-              <Card padding="md" className="space-y-2 border border-accent/30 bg-accent/5">
-                <div className="flex items-center gap-2">
-                  <span aria-hidden className="text-base">ℹ️</span>
-                  <h3 className="font-display text-sm font-bold text-ink">Cómo puntúan las eliminatorias</h3>
-                </div>
-                <ul className="space-y-1.5 text-[13px] leading-snug text-ink-muted">
-                  <li className="flex gap-2">
-                    <span aria-hidden>⏱️</span>
-                    <span>
-                      El marcador y el ganador se cuentan{" "}
-                      <strong className="text-ink">hasta el minuto 120</strong> (con tiempo extra).
-                      Si termina en empate, ese empate es el que puntúa.
-                    </span>
-                  </li>
-                  <li className="flex gap-2">
-                    <span aria-hidden>🎯</span>
-                    <span>
-                      Acertar <strong className="text-ink">quién clasifica</strong> suma{" "}
-                      <strong className="text-ink">1 punto extra</strong>, solo si el partido se
-                      define por penales.
-                    </span>
-                  </li>
-                </ul>
-              </Card>
+              <KnockoutScoringCard />
 
               <div className="flex items-center gap-2 rounded-xl border-2 border-transparent bg-surface-2 px-3 transition-colors hover:border-[var(--accent)] focus-within:border-[var(--accent)] focus-within:ring-2 focus-within:ring-[var(--accent)]">
                 <svg viewBox="0 0 24 24" className="h-4 w-4 shrink-0 text-ink-faint" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
@@ -922,6 +926,8 @@ export default function DashboardPage() {
                           kickoffLabel={formatKickoffDateTime(m.kickoffTime)}
                           prediction={predValue(m.id)}
                           saving={savingPred[m.id]}
+                          justSaved={savedPred[m.id]}
+                          error={predError[m.id]}
                           onPredictionChange={(next) => onPredChange(m.id, next)}
                           onSave={() => savePrediction(m.id)}
                           showQualifier={isKnockoutPhase(m.phase)}
@@ -1109,5 +1115,9 @@ export default function DashboardPage() {
         </div>
       )}
     </AppShell>
+    <Toast open={!!toast} tone={toast?.tone ?? "success"} onDismiss={() => setToast(null)}>
+      {toast?.msg}
+    </Toast>
+    </>
   );
 }
