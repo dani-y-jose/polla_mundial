@@ -12,7 +12,7 @@ import { onAuthStateChanged, signOut, type User as FirebaseUser } from "firebase
 import { auth, db } from "@/lib/firebase";
 import { collection, getDocs, getDoc, doc, setDoc, updateDoc, query, where, onSnapshot, writeBatch } from "firebase/firestore";
 import { parseDoc, parseDocs } from "@/lib/parse";
-import { userSchema, groupSchema, predictionSchema, notificationSchema, championSchema } from "@/lib/schemas";
+import { userSchema, groupSchema, predictionSchema, notificationSchema, championSchema, matchSchema } from "@/lib/schemas";
 import { getMatches } from "@/lib/matches";
 import { calculateGroupScores } from "@/lib/scoring";
 import { WORLD_CUP_TEAMS } from "@/lib/flags";
@@ -263,6 +263,34 @@ export default function DashboardPage() {
     };
   }, [user]);
 
+  // Partidos en vivo: tras el paint inicial con getMatches(), este onSnapshot
+  // mantiene la lista fresca — cuando el admin carga un resultado o se bloquea
+  // un partido, se refleja al instante sin recargar (elimina la sensación de
+  // "partidos cacheados"). Con persistentLocalCache la primera emisión sale de
+  // IndexedDB al toque. El unsub va en un ref para desmontarlo ANTES de cerrar
+  // sesión, igual que notificaciones (si no, Firestore dispara permission-denied).
+  const matchesUnsubRef = useRef<(() => void) | null>(null);
+  useEffect(() => {
+    if (!user) return;
+    const unsub = onSnapshot(
+      collection(db, "matches"),
+      (snap) => {
+        const live = parseDocs(matchSchema, snap);
+        live.sort((a, b) => toMs(a.kickoffTime) - toMs(b.kickoffTime));
+        setMatches(live);
+      },
+      (err) => {
+        if ((err as { code?: string }).code === "permission-denied") return;
+        console.error("Error al escuchar partidos:", err);
+      },
+    );
+    matchesUnsubRef.current = unsub;
+    return () => {
+      unsub();
+      matchesUnsubRef.current = null;
+    };
+  }, [user]);
+
   // Pronósticos del grupo activo + nombres de integrantes (para "En vivo").
   useEffect(() => {
     if (!selectedGroup) {
@@ -339,10 +367,13 @@ export default function DashboardPage() {
   };
 
   async function handleSignOut() {
-    // Desmontar el listener de notificaciones ANTES de revocar el token, para
-    // evitar el "permission-denied" que dispara Firestore si sigue adjunto.
+    // Desmontar los listeners (notificaciones + partidos) ANTES de revocar el
+    // token, para evitar el "permission-denied" que dispara Firestore si siguen
+    // adjuntos.
     notifUnsubRef.current?.();
     notifUnsubRef.current = null;
+    matchesUnsubRef.current?.();
+    matchesUnsubRef.current = null;
     await signOut(auth);
     router.replace("/");
   }

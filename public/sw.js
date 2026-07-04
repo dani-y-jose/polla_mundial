@@ -1,7 +1,7 @@
 // Polla Mundial service worker.
 // Provides installability (a fetch handler is required for the install prompt)
 // and a light network-first cache so the app shell loads when offline.
-const CACHE = "polla-mundial-v1";
+const CACHE = "polla-mundial-v2";
 const APP_SHELL = ["/dashboard", "/login", "/manifest.webmanifest", "/icon-192x192.png"];
 
 self.addEventListener("install", (event) => {
@@ -20,18 +20,25 @@ self.addEventListener("activate", (event) => {
 
 self.addEventListener("fetch", (event) => {
   const { request } = event;
+  const url = new URL(request.url);
 
   // Only handle same-origin GETs. Let Firebase/Google/cross-origin requests
   // (auth, Firestore) pass straight through to the network.
-  if (request.method !== "GET" || new URL(request.url).origin !== self.location.origin) {
+  if (request.method !== "GET" || url.origin !== self.location.origin) {
     return;
   }
 
   event.respondWith(
     fetch(request)
       .then((response) => {
-        const copy = response.clone();
-        caches.open(CACHE).then((cache) => cache.put(request, copy)).catch(() => {});
+        // Don't cache /api/* (e.g. /api/matches): the match list must always
+        // come from the network, otherwise the SW serves stale results (matches
+        // that already finished still showing as live). The rest — the app
+        // shell — is cached for offline resilience.
+        if (!url.pathname.startsWith("/api/")) {
+          const copy = response.clone();
+          caches.open(CACHE).then((cache) => cache.put(request, copy)).catch(() => {});
+        }
         return response;
       })
       .catch(() =>
