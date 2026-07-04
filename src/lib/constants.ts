@@ -47,5 +47,11 @@ export const isKnockoutPhase = (phase: string): boolean => phase !== "group";
 // (drives the dashboard home-tab reminders).
 export const SOON_WINDOW_MIN = 60;
 
+// Lo máximo que puede durar un partido (90' + prórroga + penales + descansos y
+// añadidos). Pasado este margen desde el kickoff sin resultado cargado, el
+// partido deja de mostrarse "en vivo" y pasa a "esperando resultado": el admin
+// todavía no cargó el marcador. Evita el "en vivo" eterno.
+export const MATCH_MAX_DURATION_MIN = 210; // 3.5 h
+
 // Page size for the dashboard predictions list.
 export const PREDICTIONS_PER_PAGE = 10;

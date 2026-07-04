@@ -2,16 +2,23 @@ import { Badge, cn } from "@/components/ui";
 import type { BadgeTone } from "@/components/ui";
 import type { MatchStatus } from "@/types";
 
+// Estado de display, distinto del `MatchStatus` guardado: agrega "awaiting" —
+// el partido ya debió terminar (pasó el máximo de duración) pero aún no hay
+// resultado cargado, así no se muestra "en vivo" para siempre.
+export type MatchDisplayStatus = MatchStatus | "awaiting";
+
 // Estado del partido como pill (lifecycle upcoming→locked→finished). `locked`
-// = post-kickoff (auto-lock), o sea EN VIVO, con punto pulsante.
-const MAP: Record<MatchStatus, { tone: BadgeTone; label: string }> = {
+// = post-kickoff (auto-lock), o sea EN VIVO, con punto pulsante. `awaiting` =
+// terminó pero el marcador aún no se cargó.
+const MAP: Record<MatchDisplayStatus, { tone: BadgeTone; label: string }> = {
   upcoming: { tone: "accent", label: "Próximo" },
   locked: { tone: "danger", label: "En vivo" },
+  awaiting: { tone: "neutral", label: "Esperando resultado" },
   finished: { tone: "neutral", label: "Final" },
 };
 
 export type MatchStatusBadgeProps = {
-  status: MatchStatus;
+  status: MatchDisplayStatus;
   className?: string;
 };
 

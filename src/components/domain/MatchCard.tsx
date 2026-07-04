@@ -1,8 +1,7 @@
 import { Card, Button, Badge, cn } from "@/components/ui";
-import type { MatchStatus } from "@/types";
 import { MatchTeams } from "./MatchTeams";
 import { PhaseLabel } from "./PhaseLabel";
-import { MatchStatusBadge } from "./MatchStatusBadge";
+import { MatchStatusBadge, type MatchDisplayStatus } from "./MatchStatusBadge";
 import { ScoreInput } from "./ScoreInput";
 import { ScoreBadge } from "./ScoreBadge";
 
@@ -25,7 +24,7 @@ export type MatchCardProps = {
   homeTeam: string;
   awayTeam: string;
   phase?: string;
-  status?: MatchStatus;
+  status?: MatchDisplayStatus;
   kickoffLabel?: string;
   layout?: "row" | "stacked";
   prediction?: PredictionScore | null;

@@ -17,7 +17,7 @@ import { getMatches } from "@/lib/matches";
 import { calculateGroupScores } from "@/lib/scoring";
 import { WORLD_CUP_TEAMS } from "@/lib/flags";
 import { isChampionLocked } from "@/lib/config";
-import { RESOLUTION_TRANSLATIONS, DEFAULT_GROUP_RULES, isKnockoutPhase } from "@/lib/constants";
+import { RESOLUTION_TRANSLATIONS, DEFAULT_GROUP_RULES, isKnockoutPhase, MATCH_MAX_DURATION_MIN } from "@/lib/constants";
 import { getActiveGroupId, setActiveGroupId } from "@/lib/active-group";
 import { enablePushNotifications, pushIsSupported } from "@/lib/messaging";
 import { toMs, formatKickoffDateTime } from "@/lib/dates";
@@ -555,10 +555,21 @@ export default function DashboardPage() {
     );
 
   // Estado efectivo para display: post-kickoff y sin resultado = "en vivo"
-  // (aunque el doc siga en 'upcoming' si el auto-lock todavía no corrió).
-  const effStatus = (m: Match): "live" | "upcoming" | "finished" => {
+  // (aunque el doc siga en 'upcoming' si el auto-lock todavía no corrió). Pero
+  // acotado: pasado MATCH_MAX_DURATION_MIN desde el kickoff sin resultado, ya no
+  // está "en vivo" sino "esperando resultado" (el admin no cargó el marcador).
+  const effStatus = (m: Match): "live" | "awaiting" | "upcoming" | "finished" => {
     if (m.status === "finished") return "finished";
-    return toMs(m.kickoffTime) <= now ? "live" : "upcoming";
+    const kickoff = toMs(m.kickoffTime);
+    if (kickoff > now) return "upcoming";
+    return now - kickoff <= MATCH_MAX_DURATION_MIN * 60_000 ? "live" : "awaiting";
+  };
+
+  // Estado efectivo → prop del badge/MatchCard: "live" se pinta como "locked"
+  // (En vivo, con pulso); el resto ("awaiting"/"upcoming"/"finished") pasa igual.
+  const badgeStatus = (m: Match) => {
+    const eff = effStatus(m);
+    return eff === "live" ? "locked" : eff;
   };
 
   const predForMatch = (m: Match) => {
@@ -576,7 +587,6 @@ export default function DashboardPage() {
   const renderMatches = (list: Match[]) => (
     <div className="space-y-3">
       {list.map((m) => {
-        const eff = effStatus(m);
         const result = m.homeScore != null && m.awayScore != null ? { home: m.homeScore, away: m.awayScore } : null;
         return (
           <MatchCard
@@ -584,7 +594,7 @@ export default function DashboardPage() {
             homeTeam={m.homeTeam}
             awayTeam={m.awayTeam}
             phase={m.phase}
-            status={eff === "live" ? "locked" : eff}
+            status={badgeStatus(m)}
             kickoffLabel={formatKickoffDateTime(m.kickoffTime)}
             prediction={predForMatch(m)}
             result={result}
@@ -611,7 +621,7 @@ export default function DashboardPage() {
       <Card key={m.id} padding="md" className="space-y-3">
         <div className="flex items-center justify-between gap-2">
           <PhaseLabel phase={m.phase} />
-          <MatchStatusBadge status={m.status === "finished" ? "finished" : "locked"} />
+          <MatchStatusBadge status={badgeStatus(m)} />
         </div>
         <MatchTeams
           homeTeam={m.homeTeam}
@@ -975,7 +985,7 @@ export default function DashboardPage() {
                         homeTeam={m.homeTeam}
                         awayTeam={m.awayTeam}
                         phase={m.phase}
-                        status={m.status === "finished" ? "finished" : "locked"}
+                        status={badgeStatus(m)}
                         kickoffLabel={formatKickoffDateTime(m.kickoffTime)}
                         result={result}
                         prediction={saved ? { home: saved.predictedHomeScore, away: saved.predictedAwayScore } : undefined}
