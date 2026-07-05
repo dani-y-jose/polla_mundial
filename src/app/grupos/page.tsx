@@ -26,6 +26,7 @@ import {
   TableIcon,
   GroupsIcon,
   ProfileIcon,
+  AlbumIcon,
   type NavItem,
 } from "@/components/shell";
 
@@ -103,6 +104,10 @@ export default function GruposPage() {
 
   function nav(key: string) {
     if (key === "groups") return;
+    if (key === "album") {
+      router.push("/album");
+      return;
+    }
     router.push(`/dashboard?tab=${key}`);
   }
 
@@ -253,6 +258,7 @@ export default function GruposPage() {
     { key: "home", label: "Inicio", icon: <HomeIcon /> },
     { key: "predictions", label: "Pronósticos", icon: <PredictionsIcon /> },
     { key: "table", label: "Tabla", icon: <TableIcon /> },
+    { key: "album", label: "Álbum", icon: <AlbumIcon /> },
     { key: "groups", label: "Grupos", icon: <GroupsIcon /> },
     { key: "profile", label: "Perfil", icon: <ProfileIcon /> },
   ];

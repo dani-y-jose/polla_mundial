@@ -67,3 +67,13 @@ export const BellIcon = ({ className }: IconProps) => (
     <path d="M13.73 21a2 2 0 0 1-3.46 0" />
   </Icon>
 );
+
+// Álbum de figuritas: libro con lomo y ranuras.
+export const AlbumIcon = ({ className }: IconProps) => (
+  <Icon className={className}>
+    <path d="M6 3h11a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a1.5 1.5 0 0 1-1.5-1.5V4.5A1.5 1.5 0 0 1 6 3Z" />
+    <path d="M9.5 3v18" />
+    <path d="M13 8.5h3" />
+    <path d="M13 12h3" />
+  </Icon>
+);

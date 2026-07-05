@@ -22,6 +22,8 @@ export { Spinner } from "./Spinner";
 export type { SpinnerProps } from "./Spinner";
 export { EmptyState } from "./EmptyState";
 export type { EmptyStateProps } from "./EmptyState";
+export { ProgressBar } from "./ProgressBar";
+export type { ProgressBarProps } from "./ProgressBar";
 export { Stepper } from "./Stepper";
 export type { StepperProps } from "./Stepper";
 export { CopyButton } from "./CopyButton";

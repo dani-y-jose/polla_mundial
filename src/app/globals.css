@@ -244,7 +244,15 @@ body {
 .animation-delay-2000 { animation-delay: 2s; }
 .animation-delay-4000 { animation-delay: 4s; }
 
+/* "Foil": la barra del álbum brilla una sola vez al completarse (una pasada). */
+@keyframes shine {
+  from { transform: translateX(-140%) skewX(-14deg); }
+  to   { transform: translateX(360%) skewX(-14deg); }
+}
+.album-shine { animation: shine 1.1s cubic-bezier(0.22, 0.8, 0.2, 1) 0.15s both; }
+
 @media (prefers-reduced-motion: reduce) {
   .animate-blob,
-  .animate-stamp { animation: none; }
+  .animate-stamp,
+  .album-shine { animation: none; }
 }

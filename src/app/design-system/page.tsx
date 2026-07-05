@@ -23,6 +23,7 @@ import {
   FormLabel,
   Spinner,
   EmptyState,
+  ProgressBar,
 } from "@/components/ui";
 import {
   TeamLabel,
@@ -41,9 +42,22 @@ import {
   MatchPredictionRow,
   ChampionPick,
   PageHeader,
+  StickerCell,
+  AlbumProgress,
+  AlbumSection,
 } from "@/components/domain";
 import type { Group } from "@/types";
 import { WORLD_CUP_TEAMS } from "@/lib/flags";
+
+// Mock del álbum de figuritas (solo para el showcase del DS).
+const mkStickers = (prefix: string, n: number) =>
+  Array.from({ length: n }, (_, i) => ({ code: `${prefix}${i + 1}` }));
+const MOCK_ALBUM: { team: string; stickers: { code: string; label?: string }[] }[] = [
+  { team: "Argentina", stickers: mkStickers("ARG", 18) },
+  { team: "Brasil", stickers: mkStickers("BRA", 18) },
+  { team: "Uruguay", stickers: mkStickers("URU", 6) },
+];
+const MOCK_ALBUM_TOTAL = MOCK_ALBUM.reduce((n, t) => n + t.stickers.length, 0);
 
 type Tab = "colores" | "tipografia" | "primitivos" | "dominio";
 
@@ -207,6 +221,22 @@ export default function DesignSystemPage() {
   const [filter, setFilter] = useState("abiertos");
   const [selGroup, setSelGroup] = useState<Group | null>(MOCK_GROUPS[0]);
   const [pred, setPred] = useState<{ home: number | null; away: number | null }>({ home: 2, away: 1 });
+  const [albumOwned, setAlbumOwned] = useState<Set<string>>(
+    // Uruguay arranca COMPLETO en el demo para mostrar el estado dorado.
+    () => new Set(["ARG1", "ARG3", "ARG7", "ARG12", "BRA2", "BRA5", "BRA9", "URU1", "URU2", "URU3", "URU4", "URU5", "URU6"]),
+  );
+  const [albumFilter, setAlbumFilter] = useState<"all" | "owned" | "missing">("all");
+  const toggleSticker = (code: string) =>
+    setAlbumOwned((prev) => {
+      const n = new Set(prev);
+      if (n.has(code)) n.delete(code);
+      else n.add(code);
+      return n;
+    });
+  const albumHave = MOCK_ALBUM.reduce(
+    (n, t) => n + t.stickers.reduce((m, s) => m + (albumOwned.has(s.code) ? 1 : 0), 0),
+    0,
+  );
 
   // Dev-only: 404 in production builds.
   if (process.env.NODE_ENV === "production") notFound();
@@ -416,6 +446,14 @@ export default function DesignSystemPage() {
               <Demo title="EmptyState">
                 <EmptyState className="w-full" icon="⚽" title="Sin partidos">No hay partidos para mostrar todavía.</EmptyState>
               </Demo>
+
+              <Demo title="ProgressBar · value/max (primary / accent)">
+                <div className="w-full space-y-3">
+                  <ProgressBar value={64} />
+                  <ProgressBar value={7} max={10} tone="accent" />
+                  <ProgressBar value={0} />
+                </div>
+              </Demo>
             </div>
           )}
 
@@ -621,6 +659,42 @@ export default function DesignSystemPage() {
               <Demo title="PageHeader">
                 <div className="w-full">
                   <PageHeader title="Mis predicciones" subtitle="Octavos de final · 8 partidos" action={<Button size="sm">Compartir</Button>} />
+                </div>
+              </Demo>
+
+              <Demo title="AlbumProgress · en progreso / completo (oro + brillo)">
+                <div className="w-full space-y-3">
+                  <AlbumProgress owned={albumHave} total={MOCK_ALBUM_TOTAL} />
+                  <AlbumProgress owned={12} total={12} />
+                </div>
+              </Demo>
+
+              <Demo title="StickerCell · figurita (tengo / falta · toggle)">
+                <StickerCell code="ARG5" owned label="Lionel Messi" onToggle={() => {}} />
+                <StickerCell code="ARG6" label="Julián Álvarez" onToggle={() => {}} />
+                <StickerCell code="BRA10" owned onToggle={() => {}} />
+                <StickerCell code="BRA11" onToggle={() => {}} />
+              </Demo>
+
+              <Demo title="AlbumSection · equipo (filtro + grilla · interactivo)">
+                <div className="w-full space-y-3">
+                  <div className="flex flex-wrap gap-2">
+                    {(["all", "owned", "missing"] as const).map((f) => (
+                      <FilterPill key={f} active={albumFilter === f} onClick={() => setAlbumFilter(f)}>
+                        {f === "all" ? "Todas" : f === "owned" ? "Tengo" : "Faltan"}
+                      </FilterPill>
+                    ))}
+                  </div>
+                  {MOCK_ALBUM.map((t) => (
+                    <AlbumSection
+                      key={t.team}
+                      team={t.team}
+                      stickers={t.stickers}
+                      owned={albumOwned}
+                      filter={albumFilter}
+                      onToggle={toggleSticker}
+                    />
+                  ))}
                 </div>
               </Demo>
             </div>

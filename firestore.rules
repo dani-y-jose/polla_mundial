@@ -184,6 +184,21 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
+    // ---- Albums (colección de figuritas por usuario) ----
+    // One doc per user (id = uid). Personal sticker tracking — a user reads and
+    // writes ONLY their own doc. `owned` must be a list of sticker codes; the
+    // stored userId must match the doc id. Display-only, no points.
+    match /albums/{userId} {
+      allow read: if isSignedIn() && request.auth.uid == userId;
+
+      allow create, update: if isSignedIn()
+        && request.auth.uid == userId
+        && request.resource.data.userId == userId
+        && request.resource.data.owned is list;
+
+      allow delete: if isAdmin();
+    }
+
     // ---- Groups ----
     match /groups/{groupId} {
       // Only members (and admins) can read a group.

@@ -16,5 +16,6 @@ export type {
   Match,
   Prediction,
   Champion,
+  Album,
   Notification,
 } from "@/lib/schemas";

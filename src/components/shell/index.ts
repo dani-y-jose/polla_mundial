@@ -7,4 +7,4 @@ export { NotificationsBell } from "./NotificationsBell";
 export type { NotificationsBellProps, NotificationItem } from "./NotificationsBell";
 export { RefreshButton } from "./RefreshButton";
 export type { RefreshButtonProps } from "./RefreshButton";
-export { HomeIcon, PredictionsIcon, TableIcon, GroupsIcon, ProfileIcon, BellIcon } from "./icons";
+export { HomeIcon, PredictionsIcon, TableIcon, GroupsIcon, ProfileIcon, BellIcon, AlbumIcon } from "./icons";

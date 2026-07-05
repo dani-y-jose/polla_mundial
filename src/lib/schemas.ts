@@ -168,6 +168,17 @@ export const championSchema = z.object({
 });
 export type Champion = z.infer<typeof championSchema>;
 
+// ---- Albums (colección de figuritas por usuario) ----
+// Un doc por usuario (id = uid). `owned` = códigos de figuritas que tiene.
+// Personal, NO por grupo. Lenient en la lectura: repara docs incompletos.
+export const albumSchema = z.object({
+  id: z.string(),
+  userId: z.string().optional(),
+  owned: z.array(z.string()).default([]),
+  updatedAt: zTimestamp.optional(),
+});
+export type Album = z.infer<typeof albumSchema>;
+
 // ---- Notifications ----
 export const notificationSchema = z.object({
   id: z.string(),
