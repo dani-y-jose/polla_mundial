@@ -13,7 +13,6 @@ import { auth, db } from "@/lib/firebase";
 import { collection, getDocs, getDoc, doc, setDoc, updateDoc, query, where, onSnapshot, writeBatch } from "firebase/firestore";
 import { parseDoc, parseDocs } from "@/lib/parse";
 import { userSchema, groupSchema, predictionSchema, notificationSchema, championSchema, matchSchema } from "@/lib/schemas";
-import { getMatches } from "@/lib/matches";
 import { calculateGroupScores } from "@/lib/scoring";
 import { WORLD_CUP_TEAMS } from "@/lib/flags";
 import { isChampionLocked } from "@/lib/config";
@@ -40,6 +39,7 @@ import {
   AppShell,
   ThemeToggle,
   NotificationsBell,
+  RefreshButton,
   HomeIcon,
   PredictionsIcon,
   TableIcon,
@@ -55,25 +55,6 @@ const Brand = () => (
   <span className="font-display text-lg font-extrabold tracking-tight text-ink">
     Polla <span className="text-[var(--accent)]">2026</span>
   </span>
-);
-
-// Ícono refresh (trazo, mismo estilo que la nav); gira mientras `spinning`.
-const RefreshIcon = ({ spinning }: { spinning?: boolean }) => (
-  <svg
-    viewBox="0 0 24 24"
-    fill="none"
-    stroke="currentColor"
-    strokeWidth={1.9}
-    strokeLinecap="round"
-    strokeLinejoin="round"
-    className={cn("h-4 w-4", spinning && "motion-safe:animate-spin")}
-    aria-hidden
-  >
-    <path d="M23 4v6h-6" />
-    <path d="M1 20v-6h6" />
-    <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10" />
-    <path d="M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
-  </svg>
 );
 
 const Section = ({ title, live, children }: { title: string; live?: boolean; children: React.ReactNode }) => (
@@ -221,10 +202,9 @@ export default function DashboardPage() {
       }
       setUser(u);
       try {
-        const [userDoc, groupSnap, matchesData, predsSnap, champsSnap] = await Promise.all([
+        const [userDoc, groupSnap, predsSnap, champsSnap] = await Promise.all([
           getDoc(doc(db, "users", u.uid)),
           getDocs(query(collection(db, "groups"), where("members", "array-contains", u.uid))),
-          getMatches(),
           getDocs(query(collection(db, "predictions"), where("userId", "==", u.uid))),
           getDocs(query(collection(db, "champions"), where("userId", "==", u.uid))),
         ]);
@@ -235,8 +215,10 @@ export default function DashboardPage() {
         const chosen = gs.find((g) => g.id === wantedGroup) ?? gs[0] ?? null;
         setSelectedGroup(chosen);
         if (chosen) setActiveGroupId(chosen.id);
-        matchesData.sort((a, b) => toMs(a.kickoffTime) - toMs(b.kickoffTime));
-        setMatches(matchesData);
+        // OJO: `matches` NO se carga acá. Viene SOLO del onSnapshot (más abajo).
+        // Antes esto hacía `setMatches(await getMatches())`, pero ese fetch a
+        // /api/matches es lento (~1.5s) y a veces stale, y pisaba el dato fresco
+        // que el listener ya había emitido → partidos "cacheados" hasta recargar.
         const byGroup: Record<string, Record<string, Prediction>> = {};
         parseDocs(predictionSchema, predsSnap).forEach((p) => {
           if (p.groupId) (byGroup[p.groupId] ??= {})[p.matchId] = p;
@@ -284,12 +266,13 @@ export default function DashboardPage() {
     };
   }, [user]);
 
-  // Partidos en vivo: tras el paint inicial con getMatches(), este onSnapshot
-  // mantiene la lista fresca — cuando el admin carga un resultado o se bloquea
-  // un partido, se refleja al instante sin recargar (elimina la sensación de
-  // "partidos cacheados"). Con persistentLocalCache la primera emisión sale de
-  // IndexedDB al toque. El unsub va en un ref para desmontarlo ANTES de cerrar
-  // sesión, igual que notificaciones (si no, Firestore dispara permission-denied).
+  // Partidos: este onSnapshot es la ÚNICA fuente de `matches`. Con
+  // persistentLocalCache la 1ª emisión sale de IndexedDB al instante (paint
+  // rápido) y luego sincroniza del server, así que cuando el admin carga un
+  // resultado o se bloquea un partido se refleja solo, sin recargar. No usamos
+  // getMatches()/api/matches acá: ese fetch lento y a veces stale pisaba el dato
+  // fresco del listener → "partidos cacheados". El unsub va en un ref para
+  // desmontarlo ANTES de signOut (si no, Firestore dispara permission-denied).
   const matchesUnsubRef = useRef<(() => void) | null>(null);
   useEffect(() => {
     if (!user) return;
@@ -429,20 +412,35 @@ export default function DashboardPage() {
     router.replace("/");
   }
 
-  // "Actualizar tabla": re-lee el doc del grupo (miembros + reglas). Los
-  // pronósticos ya son vivos (onSnapshot); refrescar selectedGroup dispara la
-  // recarga de nombres y recalcula la tabla. Feedback con toast.
-  async function refreshTable() {
-    if (!selectedGroup) return;
+  // "Actualizar": re-lee de una lo que NO es vivo — grupos, TUS pronósticos y tu
+  // campeón (los partidos y los pronósticos del grupo ya vienen por onSnapshot).
+  // Refresca miembros/reglas del grupo activo y recalcula la tabla. Se usa en
+  // Inicio, Pronósticos y Tabla. Feedback con toast.
+  async function refresh() {
+    if (!user) return;
     setRefreshing(true);
     try {
-      const snap = await getDoc(doc(db, "groups", selectedGroup.id));
-      const fresh = parseDoc(groupSchema, snap);
-      if (fresh) {
-        setSelectedGroup(fresh);
-        setGroups((prev) => prev.map((g) => (g.id === fresh.id ? fresh : g)));
-      }
-      showToast("success", "Tabla actualizada");
+      const [groupSnap, predsSnap, champsSnap] = await Promise.all([
+        getDocs(query(collection(db, "groups"), where("members", "array-contains", user.uid))),
+        getDocs(query(collection(db, "predictions"), where("userId", "==", user.uid))),
+        getDocs(query(collection(db, "champions"), where("userId", "==", user.uid))),
+      ]);
+      const gs = parseDocs(groupSchema, groupSnap);
+      setGroups(gs);
+      // Mantener el grupo activo (con su doc fresco: miembros/reglas); si ya no
+      // soy miembro, caer al primero.
+      setSelectedGroup((prev) => gs.find((g) => g.id === prev?.id) ?? gs[0] ?? null);
+      const byGroup: Record<string, Record<string, Prediction>> = {};
+      parseDocs(predictionSchema, predsSnap).forEach((p) => {
+        if (p.groupId) (byGroup[p.groupId] ??= {})[p.matchId] = p;
+      });
+      setPredictionsByGroup(byGroup);
+      const champByGroup: Record<string, string> = {};
+      parseDocs(championSchema, champsSnap).forEach((c) => {
+        if (c.groupId && c.champion) champByGroup[c.groupId] = c.champion;
+      });
+      setChampionsByGroup(champByGroup);
+      showToast("success", "Actualizado");
     } catch (err) {
       console.error(err);
       showToast("error", "No se pudo actualizar. Revisa tu conexión.");
@@ -615,6 +613,16 @@ export default function DashboardPage() {
   }
 
   const hasGroups = groups.length > 0;
+
+  // Acciones comunes del header, iguales en Inicio, Pronósticos y Tabla para que
+  // se vean uniformes: botón de actualizar (icono circular, solo si hay grupo) +
+  // campana de notificaciones. Ambos con el mismo look de icono redondo.
+  const headerActions = (
+    <div className="flex items-center gap-2">
+      {hasGroups && <RefreshButton onClick={refresh} refreshing={refreshing} />}
+      <NotificationsBell items={notifications} onOpen={markAllRead} />
+    </div>
+  );
 
   // Subtítulo común del PageHeader: el selector de grupo (dropdown) en mobile;
   // en ≥lg vive en la sidebar, así que acá va oculto para no duplicar.
@@ -811,7 +819,7 @@ export default function DashboardPage() {
           <PageHeader
             title={`¡Hola, ${name}!`}
             subtitle={groupSubtitle("Todavía no estás en ningún grupo")}
-            action={<NotificationsBell items={notifications} onOpen={markAllRead} />}
+            action={headerActions}
           />
 
           {selectedGroup && (
@@ -903,7 +911,7 @@ export default function DashboardPage() {
       {/* ── Pronósticos ────────────────────────────────────────────────────── */}
       {tab === "predictions" && (
         <div className="space-y-5">
-          <PageHeader title="Pronósticos" subtitle={groupSubtitle("Sin grupo")} />
+          <PageHeader title="Pronósticos" subtitle={groupSubtitle("Sin grupo")} action={headerActions} />
 
           {!hasGroups ? (
             <Card padding="lg" className="space-y-4">
@@ -1099,14 +1107,7 @@ export default function DashboardPage() {
         <div className="space-y-5">
           <PageHeader
             title={hasResults && myRank > 0 ? `¡${rankPhrase(myRank, standings.length)}, ${firstName}!` : "Tabla"}
-            action={
-              selectedGroup ? (
-                <Button variant="secondary" size="sm" onClick={refreshTable} disabled={refreshing}>
-                  <RefreshIcon spinning={refreshing} />
-                  {refreshing ? "Actualizando…" : "Actualizar"}
-                </Button>
-              ) : undefined
-            }
+            action={headerActions}
             subtitle={
               !hasGroups ? (
                 "Sin grupo"
