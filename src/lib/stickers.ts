@@ -57,8 +57,13 @@ function teamStickers(code: string): StickerCatalogItem[] {
   });
 }
 
-// 20 especiales "FWC": emblema, mascotas, balón, trofeo, sedes e historia/Museo FIFA.
-const SPECIALS: StickerCatalogItem[] = Array.from({ length: 20 }, (_, i) => ({ code: `FWC ${i + 1}` }));
+// Especiales (20 en total): la figurita "00" (portada/brillo, abre el álbum) +
+// "FWC 1"–"FWC 19" (emblema, mascotas, balón, trofeo, sedes, historia/Museo FIFA).
+// La "00" ES una de las 20 especiales (confirmado con el álbum físico).
+const SPECIALS: StickerCatalogItem[] = [
+  { code: "00", label: "Portada" },
+  ...Array.from({ length: 19 }, (_, i) => ({ code: `FWC ${i + 1}` })),
+];
 
 // Página Coca-Cola — edición LATINOAMÉRICA (14 figuritas, CC1–CC14). NO salen en
 // sobres: sólo en botellas de Coca-Cola / Coke Zero (bajo la etiqueta). Códigos y
@@ -88,5 +93,5 @@ export const ALBUM_SECTIONS: AlbumTeamSection[] = [
 ];
 
 // Total de figuritas a pegar (para el % de completado).
-// = 48×20 (960) + 20 FWC + 14 Coca-Cola = 994.
+// = 48×20 (960) + 20 especiales (00 + FWC 1–19) + 14 Coca-Cola = 994.
 export const ALBUM_TOTAL = ALBUM_SECTIONS.reduce((n, s) => n + s.stickers.length, 0);
