@@ -1,6 +1,6 @@
 import { Badge, Card, cn } from "@/components/ui";
 import type { Group } from "@/types";
-import { DEFAULT_GROUP_RULES } from "@/lib/constants";
+import { DEFAULT_GROUP_RULES, PHASE_TRANSLATIONS } from "@/lib/constants";
 
 // Resumen del grupo: el pozo (inscripción + estimado + reparto 1º/2º/3º) y las
 // reglas de puntos. El pozo estimado = miembros × inscripción. Las medallas usan
@@ -39,6 +39,16 @@ export function GroupSummary({ group, memberCount, className }: GroupSummaryProp
 
   return (
     <Card padding="md" className={cn("space-y-3", className)}>
+      {/* Fase de arranque — solo si el grupo no juega todo el torneo */}
+      {group.startPhase && group.startPhase !== "group" && (
+        <div className="flex items-center gap-2 rounded-lg bg-accent/10 px-3 py-2">
+          <span className="text-sm">🎯</span>
+          <p className="text-xs font-bold text-ink">
+            Arranca en {PHASE_TRANSLATIONS[group.startPhase] ?? group.startPhase}
+          </p>
+        </div>
+      )}
+
       {/* Pozo */}
       <div className="flex items-center justify-between gap-3">
         <div>

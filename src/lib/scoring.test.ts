@@ -1,6 +1,6 @@
 import { calculatePoints, calculateGroupScores } from "./scoring";
 import { Match, Prediction, GroupRules } from "@/types";
-import { QUALIFIER_POINTS } from "@/lib/constants";
+import { QUALIFIER_POINTS, matchInGroupScope } from "@/lib/constants";
 
 function runTests() {
   console.log("Testing calculatePoints...");
@@ -317,6 +317,23 @@ function runTests() {
   ];
   const scoresE = calculateGroupScores(GROUP, members, normalKnockout, predictionsE, rules);
   console.assert(scoresE["user1"].totalPoints === 15, `user1 should have 15 pts (exact + unique, no qualifier bonus on a non-penalty match), got ${scoresE["user1"].totalPoints}`);
+
+  // ── matchInGroupScope: per-group phase floor ──────────────────────────────
+  console.log("Testing matchInGroupScope (group phase floor)...");
+  const m = (phase: string) => ({ phase } as unknown as Match);
+  // No floor (undefined) → group plays everything.
+  console.assert(matchInGroupScope(m("group"), {}) === true, "no startPhase includes group stage");
+  console.assert(matchInGroupScope(m("finals"), {}) === true, "no startPhase includes finals");
+  // Floor at cuartos → octavos and earlier are out, cuartos-onward are in.
+  const qfGroup = { startPhase: "quarter_finals" as const };
+  console.assert(matchInGroupScope(m("group"), qfGroup) === false, "cuartos group excludes group stage");
+  console.assert(matchInGroupScope(m("round_of_16"), qfGroup) === false, "cuartos group excludes octavos");
+  console.assert(matchInGroupScope(m("quarter_finals"), qfGroup) === true, "cuartos group includes cuartos");
+  console.assert(matchInGroupScope(m("semi_finals"), qfGroup) === true, "cuartos group includes semis");
+  console.assert(matchInGroupScope(m("finals"), qfGroup) === true, "cuartos group includes final");
+  // Floor equal to the phase is inclusive; an unknown phase sorts last (out).
+  console.assert(matchInGroupScope(m("finals"), { startPhase: "finals" as const }) === true, "final-only group includes final");
+  console.assert(matchInGroupScope(m("bogus"), qfGroup) === true, "unknown phase sorts last → shown, never silently hidden");
 
   console.log("All scoring and group bonus tests passed successfully.");
 }

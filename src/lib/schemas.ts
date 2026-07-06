@@ -113,6 +113,11 @@ export const groupSchema = z.object({
   entryFee: z.number().optional(),
   rules: groupRulesSchema.optional(),
   prizeDistribution: groupPrizeDistributionSchema.optional(),
+  // The earliest phase this group plays. A group with `startPhase: "quarter_finals"`
+  // only ever sees (and scores) matches at or after cuartos — everything earlier
+  // is hidden. Absent means the group plays the whole tournament (floor = "group").
+  // Set at creation and not editable afterwards; see matchInGroupScope in constants.
+  startPhase: matchPhaseSchema.optional(),
 });
 export type Group = z.infer<typeof groupSchema>;
 

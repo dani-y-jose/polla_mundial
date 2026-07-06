@@ -2,7 +2,7 @@
 // into the dashboard, admin and group-detail pages; this is now their single
 // source of truth. UI strings stay in Spanish (see CLAUDE.md).
 
-import type { GroupRules } from "@/types";
+import type { Group, GroupRules, Match, MatchPhase } from "@/types";
 
 // Match phase → Spanish label. Shown wherever a match's phase is rendered.
 // Callers use `PHASE_TRANSLATIONS[phase] || phase` to tolerate unknown phases.
@@ -14,6 +14,41 @@ export const PHASE_TRANSLATIONS: Record<string, string> = {
   semi_finals: "Semifinales",
   finals: "Gran Final",
 };
+
+// Chronological order of the tournament phases. Used to compare phases (a group
+// that "starts at cuartos" includes every phase whose index is >= that of
+// quarter_finals). Keep in sync with matchPhaseSchema.
+export const PHASE_ORDER: MatchPhase[] = [
+  "group",
+  "round_of_32",
+  "round_of_16",
+  "quarter_finals",
+  "semi_finals",
+  "finals",
+];
+
+// Numeric rank of a phase (earlier = smaller). Unknown phases sort last, so a
+// stray/mislabeled phase is shown (>= any floor) rather than silently hidden.
+// Real matches always carry a valid enum phase (matchPhaseSchema), so this only
+// governs defensive edge cases.
+export const phaseIndex = (phase: string): number => {
+  const i = PHASE_ORDER.indexOf(phase as MatchPhase);
+  return i === -1 ? PHASE_ORDER.length : i;
+};
+
+// A group's phase floor: the earliest phase it plays. Groups created before
+// `startPhase` existed have none → they play the whole tournament ("group").
+export const groupStartPhase = (group: Pick<Group, "startPhase">): MatchPhase =>
+  group.startPhase ?? "group";
+
+// True when a match belongs to a group's scope — i.e. its phase is at or after
+// the group's floor. A cuartos-only group hides all group/octavos matches from
+// display, prediction and scoring. This is the single gate for per-group match
+// visibility; filter with it before rendering or scoring a group's matches.
+export const matchInGroupScope = (
+  match: Pick<Match, "phase">,
+  group: Pick<Group, "startPhase">,
+): boolean => phaseIndex(match.phase) >= phaseIndex(groupStartPhase(group));
 
 // How a finished match was resolved → Spanish label (admin + group detail).
 export const RESOLUTION_TRANSLATIONS: Record<string, string> = {

@@ -14,6 +14,8 @@ import { parseDoc, parseDocs } from "@/lib/parse";
 import { groupSchema } from "@/lib/schemas";
 import type { Group, Invite } from "@/types";
 import { getMaxMembersPerGroup } from "@/lib/config";
+import { PHASE_ORDER, PHASE_TRANSLATIONS, phaseIndex } from "@/lib/constants";
+import type { MatchPhase } from "@/types";
 import { groupRulesInputSchema, prizeInputSchema, entryFeeSchema, firstError } from "@/lib/form-schemas";
 import { getActiveGroupId, setActiveGroupId } from "@/lib/active-group";
 import { Button, Card, Input, FormLabel, AlertBanner, Spinner, EmptyState, Badge, Stepper, CopyButton, cn } from "@/components/ui";
@@ -44,6 +46,14 @@ function randomCode() {
 }
 
 const money = (n?: number) => (n && n > 0 ? `$${n.toLocaleString("es")}` : "Gratis");
+
+// Cada bono de fase se gana acertando TODA una ronda; solo tiene sentido si esa
+// ronda es parte del grupo (su fase >= la fase de arranque). Ver scoring.ts.
+const BONUS_TRIGGER_PHASE: Record<"qf" | "sf" | "fin", MatchPhase> = {
+  qf: "round_of_16", // Bono cuartos: acertar los 8 octavos
+  sf: "quarter_finals", // Bono semis: acertar los 4 cuartos
+  fin: "semi_finals", // Bono final: acertar las 2 semis
+};
 const PRIZE_PRESETS: [number, number, number][] = [
   [50, 30, 20],
   [60, 30, 10],
@@ -66,6 +76,7 @@ export default function GruposPage() {
   const [createOpen, setCreateOpen] = useState(false);
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [name, setName] = useState("");
+  const [startPhase, setStartPhase] = useState<MatchPhase>("group");
   const [fee, setFee] = useState(0);
   const [exact, setExact] = useState(3);
   const [outcome, setOutcome] = useState(1);
@@ -151,13 +162,16 @@ export default function GruposPage() {
     setCreateError("");
     try {
       const feeParsed = entryFeeSchema.safeParse(fee);
+      // Los bonos de rondas anteriores a la fase de arranque no aplican (el grupo
+      // nunca pronostica esas rondas); se guardan en 0 aunque el input tuviera valor.
+      const startIdx = phaseIndex(startPhase);
       const rulesParsed = groupRulesInputSchema.safeParse({
         exactScorePoints: exact,
         correctOutcomePoints: outcome,
         uniquePredictionPoints: unique,
-        quarterFinalsBonus: qf,
-        semiFinalsBonus: sf,
-        finalsBonus: fin,
+        quarterFinalsBonus: phaseIndex(BONUS_TRIGGER_PHASE.qf) >= startIdx ? qf : 0,
+        semiFinalsBonus: phaseIndex(BONUS_TRIGGER_PHASE.sf) >= startIdx ? sf : 0,
+        finalsBonus: phaseIndex(BONUS_TRIGGER_PHASE.fin) >= startIdx ? fin : 0,
       });
       const prizeParsed = prizeInputSchema.safeParse({ firstPlacePercent: p1, secondPlacePercent: p2, thirdPlacePercent: p3 });
       if (!feeParsed.success) {
@@ -195,6 +209,8 @@ export default function GruposPage() {
         entryFee: feeParsed.data,
         rules: rulesParsed.data,
         prizeDistribution: prizeParsed.data,
+        // Solo se persiste cuando no es el default: un grupo "normal" juega todo.
+        ...(startPhase !== "group" ? { startPhase } : {}),
       };
       const groupInvite: Invite = {
         code,
@@ -217,6 +233,7 @@ export default function GruposPage() {
 
       setGroups((prev) => [...prev, newGroup]);
       setName("");
+      setStartPhase("group");
       setFee(0);
       setExact(3);
       setOutcome(1);
@@ -374,6 +391,30 @@ export default function GruposPage() {
                 </div>
 
                 <div>
+                  <FormLabel htmlFor="gstart">¿Desde qué fase arranca?</FormLabel>
+                  <div className="flex items-center gap-2 rounded-xl border-2 border-transparent bg-surface-2 px-3 transition-colors focus-within:border-[var(--accent)] focus-within:ring-2 focus-within:ring-[var(--accent)]">
+                    <select
+                      id="gstart"
+                      value={startPhase}
+                      onChange={(e) => setStartPhase(e.target.value as MatchPhase)}
+                      aria-label="Fase de arranque del grupo"
+                      className="min-w-0 flex-1 bg-transparent py-2.5 text-sm text-ink focus:outline-none"
+                    >
+                      {PHASE_ORDER.map((p) => (
+                        <option key={p} value={p} className="bg-surface">
+                          {PHASE_TRANSLATIONS[p]}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <p className="mt-1.5 text-[11px] text-ink-muted">
+                    {startPhase === "group"
+                      ? "El grupo juega todo el torneo."
+                      : `Solo se verán y puntuarán partidos desde ${PHASE_TRANSLATIONS[startPhase]}. No se puede cambiar después.`}
+                  </p>
+                </div>
+
+                <div>
                   <FormLabel htmlFor="fee">Inscripción al pozo</FormLabel>
                   <div className="flex items-center gap-2 rounded-xl border-2 border-transparent bg-surface-2 px-3 transition-colors focus-within:border-[var(--accent)] focus-within:ring-2 focus-within:ring-[var(--accent)]">
                     <span className="text-sm font-bold text-ink-faint">$</span>
@@ -412,9 +453,15 @@ export default function GruposPage() {
                         <Stepper label="Marcador exacto" value={exact} onChange={setExact} max={20} suffix="pts" />
                         <Stepper label="Acertar ganador" value={outcome} onChange={setOutcome} max={20} suffix="pts" />
                         <Stepper label="Bono única" value={unique} onChange={setUnique} max={20} suffix="pts" />
-                        <Stepper label="Bono cuartos" value={qf} onChange={setQf} max={20} suffix="pts" />
-                        <Stepper label="Bono semis" value={sf} onChange={setSf} max={20} suffix="pts" />
-                        <Stepper label="Bono final" value={fin} onChange={setFin} max={20} suffix="pts" />
+                        {phaseIndex(BONUS_TRIGGER_PHASE.qf) >= phaseIndex(startPhase) && (
+                          <Stepper label="Bono cuartos" value={qf} onChange={setQf} max={20} suffix="pts" />
+                        )}
+                        {phaseIndex(BONUS_TRIGGER_PHASE.sf) >= phaseIndex(startPhase) && (
+                          <Stepper label="Bono semis" value={sf} onChange={setSf} max={20} suffix="pts" />
+                        )}
+                        {phaseIndex(BONUS_TRIGGER_PHASE.fin) >= phaseIndex(startPhase) && (
+                          <Stepper label="Bono final" value={fin} onChange={setFin} max={20} suffix="pts" />
+                        )}
                       </div>
                     </div>
 

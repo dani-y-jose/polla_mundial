@@ -13,7 +13,7 @@ import { groupRulesInputSchema, prizeInputSchema, entryFeeSchema, firstError } f
 import { calculateGroupScores, getOutcome } from "@/lib/scoring";
 import { formatKickoffDateTime, toMs } from "@/lib/dates";
 import { useDialog } from "@/components/DialogProvider";
-import { RESOLUTION_TRANSLATIONS, DEFAULT_GROUP_RULES } from "@/lib/constants";
+import { RESOLUTION_TRANSLATIONS, DEFAULT_GROUP_RULES, matchInGroupScope } from "@/lib/constants";
 import { WhatsAppShareButton, RankBadge, PhaseLabel } from "@/components/domain";
 
 export default function GroupDetailPage() {
@@ -131,8 +131,12 @@ export default function GroupDetailPage() {
           membersData.push(...parseDocs(userSchema, uSnapshot));
         }
 
-        // 3. Fetch Matches (from the cached /api/matches endpoint).
-        const matchesData = await getMatches();
+        // 3. Fetch Matches (from the cached /api/matches endpoint). Restringidos
+        // a la fase de arranque del grupo: un grupo "desde cuartos" no muestra ni
+        // puntúa octavos ni fases anteriores. Este `matchesData` (ya filtrado) es
+        // la única fuente aguas abajo (estado, tabla, listado).
+        const allMatches = await getMatches();
+        const matchesData = allMatches.filter((m) => matchInGroupScope(m, groupData));
         matchesData.sort((a, b) => {
           const timeA = toMs(a.kickoffTime);
           const timeB = toMs(b.kickoffTime);

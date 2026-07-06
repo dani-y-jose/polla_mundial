@@ -16,7 +16,7 @@ import { userSchema, groupSchema, predictionSchema, notificationSchema, champion
 import { calculateGroupScores } from "@/lib/scoring";
 import { WORLD_CUP_TEAMS } from "@/lib/flags";
 import { isChampionLocked } from "@/lib/config";
-import { RESOLUTION_TRANSLATIONS, DEFAULT_GROUP_RULES, isKnockoutPhase, MATCH_MAX_DURATION_MIN } from "@/lib/constants";
+import { RESOLUTION_TRANSLATIONS, DEFAULT_GROUP_RULES, isKnockoutPhase, MATCH_MAX_DURATION_MIN, matchInGroupScope, phaseIndex, groupStartPhase } from "@/lib/constants";
 import { getActiveGroupId, setActiveGroupId } from "@/lib/active-group";
 import { enablePushNotifications, pushIsSupported } from "@/lib/messaging";
 import { toMs, formatKickoffDateTime } from "@/lib/dates";
@@ -359,6 +359,14 @@ export default function DashboardPage() {
     };
   }, [selectedGroup]);
 
+  // Partidos que este grupo juega: se ocultan (de la vista, el pronóstico y la
+  // tabla) los partidos anteriores a su fase de arranque. Un grupo "desde
+  // cuartos" nunca ve grupos/octavos. Grupos sin startPhase juegan todo.
+  const visibleMatches = useMemo(
+    () => (selectedGroup ? matches.filter((m) => matchInGroupScope(m, selectedGroup)) : matches),
+    [matches, selectedGroup],
+  );
+
   // Tabla: posiciones del grupo, recalculadas desde predicciones + resultados
   // (calculateGroupScores honra las reglas del grupo). Ordena por puntos, luego
   // doradas, luego nombre.
@@ -366,14 +374,14 @@ export default function DashboardPage() {
     if (!selectedGroup) return [];
     const preds = Object.values(groupPreds).flatMap((byUid) => Object.values(byUid));
     const rules = selectedGroup.rules ?? DEFAULT_GROUP_RULES;
-    const scores = calculateGroupScores(selectedGroup.id, selectedGroup.members, matches, preds, rules);
+    const scores = calculateGroupScores(selectedGroup.id, selectedGroup.members, visibleMatches, preds, rules);
     return selectedGroup.members
       .map((uid) => {
         const s = scores[uid] ?? { totalPoints: 0, exactGuesses: 0 };
         return { uid, name: memberNames[uid] ?? "—", points: s.totalPoints, exact: s.exactGuesses };
       })
       .sort((a, b) => b.points - a.points || b.exact - a.exact || a.name.localeCompare(b.name));
-  }, [selectedGroup, groupPreds, matches, memberNames]);
+  }, [selectedGroup, groupPreds, visibleMatches, memberNames]);
 
   const name = dbUser?.displayName || user?.displayName || user?.email?.split("@")[0] || "jugador";
 
@@ -402,6 +410,10 @@ export default function DashboardPage() {
     setSelectedGroup(groups.find((g) => g.id === id) ?? null);
     setActiveGroupId(id);
     setPredDrafts({});
+    // El nuevo grupo puede no jugar la fase filtrada actual (p. ej. venías de un
+    // grupo con "Octavos" seleccionado y este arranca en cuartos). Reset a "Todas".
+    setPredPhase("all");
+    setPredLetter("all");
   };
 
   async function handleSignOut() {
@@ -567,7 +579,8 @@ export default function DashboardPage() {
     if (val.home == null || val.away == null) return;
     if (val.home < 0 || val.home > 99 || val.away < 0 || val.away > 99) return;
     const m = matches.find((x) => x.id === matchId);
-    if (!m || toMs(m.kickoffTime) <= Date.now() || m.status === "locked" || m.status === "finished") return;
+    if (!m || !matchInGroupScope(m, selectedGroup)) return;
+    if (toMs(m.kickoffTime) <= Date.now() || m.status === "locked" || m.status === "finished") return;
     // Knockout matches require a "clasifica" pick (the MatchCard Save button is
     // already disabled until one is chosen; this guards the data layer too).
     const knockout = isKnockoutPhase(m.phase);
@@ -664,10 +677,10 @@ export default function DashboardPage() {
     return p ? { home: p.predictedHomeScore, away: p.predictedAwayScore } : undefined;
   };
 
-  const liveMatches = matches.filter((m) => effStatus(m) === "live");
+  const liveMatches = visibleMatches.filter((m) => effStatus(m) === "live");
   // "Hoy" = todo lo de hoy que NO está en vivo (incluye los ya jugados de hoy).
-  const todayMatches = matches.filter((m) => effStatus(m) !== "live" && sameDay(toMs(m.kickoffTime), now));
-  const upcomingMatches = matches
+  const todayMatches = visibleMatches.filter((m) => effStatus(m) !== "live" && sameDay(toMs(m.kickoffTime), now));
+  const upcomingMatches = visibleMatches
     .filter((m) => effStatus(m) === "upcoming" && !sameDay(toMs(m.kickoffTime), now))
     .slice(0, 8);
 
@@ -763,7 +776,7 @@ export default function DashboardPage() {
     points: s.points,
     you: s.uid === user?.uid,
   }));
-  const hasResults = matches.some((m) => m.status === "finished");
+  const hasResults = visibleMatches.some((m) => m.status === "finished");
   const myRank = standings.findIndex((s) => s.uid === user?.uid) + 1;
   const firstName = name.split(" ")[0];
 
@@ -771,15 +784,21 @@ export default function DashboardPage() {
   const isClosed = (m: Match) => toMs(m.kickoffTime) <= now || m.status === "locked" || m.status === "finished";
   const groupLetters = Array.from(
     new Set(
-      matches
+      visibleMatches
         .filter((m) => m.phase === "group")
         .map(groupLetterOf)
         .filter((l): l is string => l !== null),
     ),
   );
+  // Pestañas de fase visibles: solo las que este grupo juega (una polla "desde
+  // cuartos" no muestra Grupos ni Octavos).
+  const startIdx = phaseIndex(groupStartPhase(selectedGroup ?? {}));
+  const visiblePredPhases = PRED_PHASES.filter(
+    (p) => p.key === "all" || phaseIndex(p.key) >= startIdx,
+  );
   // Partidos que pasan TODO menos el filtro de estado — base para los contadores
   // por pestaña (Abiertos / Jugados / Todos).
-  const matchesForCounts = matches.filter((m) => {
+  const matchesForCounts = visibleMatches.filter((m) => {
     if (predPhase !== "all" && m.phase !== predPhase) return false;
     if (predPhase === "group" && predLetter !== "all" && groupLetterOf(m) !== predLetter) return false;
     if (predSearch.trim() && !norm(`${m.homeTeam} ${m.awayTeam}`).includes(norm(predSearch.trim()))) return false;
@@ -992,7 +1011,7 @@ export default function DashboardPage() {
                   aria-label="Fase"
                   className="flex-1"
                 >
-                  {PRED_PHASES.map((p) => (
+                  {visiblePredPhases.map((p) => (
                     <option key={p.key} value={p.key} className="bg-surface">
                       {p.label}
                     </option>
