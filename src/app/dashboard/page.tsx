@@ -10,7 +10,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { onAuthStateChanged, signOut, type User as FirebaseUser } from "firebase/auth";
 import { auth, db } from "@/lib/firebase";
-import { collection, getDocs, getDoc, doc, setDoc, updateDoc, query, where, onSnapshot, writeBatch } from "firebase/firestore";
+import { collection, getDocs, getDoc, doc, setDoc, updateDoc, query, where, onSnapshot, writeBatch, arrayUnion } from "firebase/firestore";
 import { parseDoc, parseDocs } from "@/lib/parse";
 import { userSchema, groupSchema, predictionSchema, notificationSchema, championSchema, matchSchema } from "@/lib/schemas";
 import { calculateGroupScores } from "@/lib/scoring";
@@ -153,6 +153,14 @@ export default function DashboardPage() {
   // Partidos jugados con el panel de "pronósticos del grupo" abierto (set de matchId).
   const [openGroupPreds, setOpenGroupPreds] = useState<Set<string>>(() => new Set());
 
+  // Invitación pendiente por confirmar — viene de ?join=CODE (link seguido ya
+  // logueado o justo tras el registro) o, como respaldo, del código que admitió
+  // esta cuenta (inviteId). El registro NO une al grupo: eso se confirma aquí.
+  const [pendingInvite, setPendingInvite] = useState<{ code: string; groupId: string; groupName: string } | null>(null);
+  const [joiningPending, setJoiningPending] = useState(false);
+  const [pendingDismissed, setPendingDismissed] = useState(false);
+  const [pendingError, setPendingError] = useState("");
+
   // Reloj liviano (30s) para clasificar partidos en vivo / hoy / próximos.
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
@@ -216,6 +224,27 @@ export default function DashboardPage() {
         const chosen = gs.find((g) => g.id === wantedGroup) ?? gs[0] ?? null;
         setSelectedGroup(chosen);
         if (chosen) setActiveGroupId(chosen.id);
+
+        // Resolver una invitación pendiente: ?join=CODE gana; si no, el código
+        // que admitió la cuenta (inviteId). Dispara la tarjeta "confirmar y
+        // unirme" solo si aún no eres miembro del grupo que ofrece. Fire-and-
+        // forget: no debe demorar el render del dashboard.
+        const joinCode =
+          new URLSearchParams(window.location.search).get("join")?.trim() ||
+          (userDoc.data()?.inviteId as string | undefined) ||
+          null;
+        if (joinCode) {
+          getDoc(doc(db, "invites", joinCode))
+            .then((invSnap) => {
+              if (!invSnap.exists()) return;
+              const inv = invSnap.data();
+              const gid = (inv.groupId as string | null) ?? null;
+              if (gid && !gs.some((g) => g.id === gid)) {
+                setPendingInvite({ code: joinCode, groupId: gid, groupName: (inv.groupName as string) || "tu grupo" });
+              }
+            })
+            .catch((e) => console.error("Error resolviendo invitación pendiente:", e));
+        }
         // OJO: `matches` NO se carga acá. Viene SOLO del onSnapshot (más abajo).
         // Antes esto hacía `setMatches(await getMatches())`, pero ese fetch a
         // /api/matches es lento (~1.5s) y a veces stale, y pisaba el dato fresco
@@ -549,6 +578,34 @@ export default function DashboardPage() {
     }
   }
 
+  // Confirmar la unión al grupo que ofrece la invitación. Agregar solo tu propio
+  // uid está permitido por las reglas (y topado por el límite de miembros); un
+  // rechazo aquí significa que el grupo está lleno. Al unirte, seleccionamos el
+  // grupo, saltamos a la tabla y soltamos el ?join= de la URL.
+  const handleConfirmJoin = async () => {
+    if (!pendingInvite || !user) return;
+    setJoiningPending(true);
+    setPendingError("");
+    try {
+      await updateDoc(doc(db, "groups", pendingInvite.groupId), { members: arrayUnion(user.uid) });
+      const gSnap = await getDoc(doc(db, "groups", pendingInvite.groupId));
+      const joined = parseDoc(groupSchema, gSnap);
+      if (joined) {
+        setGroups((prev) => (prev.some((g) => g.id === joined.id) ? prev : [...prev, joined]));
+        setSelectedGroup(joined);
+        setActiveGroupId(joined.id);
+      }
+      setPendingInvite(null);
+      router.replace("/dashboard"); // suelta el ?join=
+      setTab("table");
+    } catch (err) {
+      console.error(err);
+      setPendingError("No pudimos unirte a este grupo. Es posible que ya esté lleno.");
+    } finally {
+      setJoiningPending(false);
+    }
+  };
+
   // Valor a mostrar/editar en el ScoreInput: borrador > guardado > vacío.
   const predValue = (matchId: string): { home: number | null; away: number | null; qualifier: "home" | "away" | null } => {
     if (predDrafts[matchId]) return predDrafts[matchId];
@@ -846,6 +903,31 @@ export default function DashboardPage() {
             subtitle={groupSubtitle("Todavía no estás en ningún grupo")}
             action={headerActions}
           />
+
+          {pendingInvite && !pendingDismissed && (
+            <Card padding="lg" className="relative space-y-4 border-[var(--accent)]/40">
+              <button
+                onClick={() => setPendingDismissed(true)}
+                className="absolute right-3 top-3 flex h-7 w-7 items-center justify-center rounded-full text-ink-faint transition-colors hover:bg-surface hover:text-ink"
+                aria-label="Descartar invitación"
+              >
+                ✕
+              </button>
+              <div className="flex items-center gap-3">
+                <span className="text-2xl">🎉</span>
+                <div>
+                  <h4 className="font-display text-sm font-extrabold text-ink">Invitación a un grupo</h4>
+                  <p className="text-xs text-ink-muted">
+                    Te invitaron a unirte a <span className="font-bold text-ink">{pendingInvite.groupName}</span>.
+                  </p>
+                </div>
+              </div>
+              {pendingError && <AlertBanner tone="error">{pendingError}</AlertBanner>}
+              <Button fullWidth onClick={handleConfirmJoin} disabled={joiningPending}>
+                {joiningPending ? "Uniéndote..." : `Confirmar y unirme a ${pendingInvite.groupName}`}
+              </Button>
+            </Card>
+          )}
 
           {selectedGroup && (
             <ChampionPick
