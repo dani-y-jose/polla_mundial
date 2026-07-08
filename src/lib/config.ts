@@ -7,8 +7,10 @@ import { db } from "@/lib/firebase";
 // firestore.rules. The DB rule is authoritative; this guard is for UX only.
 export const CHAMPION_DEADLINE = new Date("2026-07-05T06:00:00Z");
 
-export function isChampionLocked(now: Date = new Date()): boolean {
-  return now.getTime() >= CHAMPION_DEADLINE.getTime();
+// `deadline` lets a caller pass a group's `championDeadline` override (see
+// groupSchema in @/lib/schemas); it defaults to the global cutoff above.
+export function isChampionLocked(now: Date = new Date(), deadline: Date = CHAMPION_DEADLINE): boolean {
+  return now.getTime() >= deadline.getTime();
 }
 
 // Global cap on members per group. Configurable only by admins (stored at

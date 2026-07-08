@@ -122,6 +122,11 @@ export const groupSchema = z.object({
   // leaderboard, but the estimated pot excludes them (pozo = paying members ×
   // inscripción). Only written via the admin CLI — there is no UI to edit it.
   feeExemptMembers: z.array(z.string()).optional(),
+  // Per-group override of the global champion-pick deadline (see
+  // CHAMPION_DEADLINE in @/lib/config and championDeadline() in
+  // firestore.rules). Absent means the group uses the global deadline. Only
+  // written via the admin CLI — there is no UI to edit it.
+  championDeadline: zTimestamp.optional(),
 });
 export type Group = z.infer<typeof groupSchema>;
 

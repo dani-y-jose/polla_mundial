@@ -15,11 +15,11 @@ import { parseDoc, parseDocs } from "@/lib/parse";
 import { userSchema, groupSchema, predictionSchema, notificationSchema, championSchema, matchSchema } from "@/lib/schemas";
 import { calculateGroupScores } from "@/lib/scoring";
 import { WORLD_CUP_TEAMS } from "@/lib/flags";
-import { isChampionLocked } from "@/lib/config";
+import { isChampionLocked, CHAMPION_DEADLINE } from "@/lib/config";
 import { RESOLUTION_TRANSLATIONS, DEFAULT_GROUP_RULES, isKnockoutPhase, MATCH_MAX_DURATION_MIN, matchInGroupScope, phaseIndex, groupStartPhase } from "@/lib/constants";
 import { getActiveGroupId, setActiveGroupId } from "@/lib/active-group";
 import { enablePushNotifications, pushIsSupported } from "@/lib/messaging";
-import { toMs, formatKickoffDateTime } from "@/lib/dates";
+import { toMs, formatKickoffDateTime, formatKickoffDate } from "@/lib/dates";
 import type { User, Group, Match, Prediction } from "@/types";
 import { Button, Card, Input, FormLabel, AlertBanner, Badge, Spinner, EmptyState, Select, Toast, cn } from "@/components/ui";
 import {
@@ -331,6 +331,9 @@ export default function DashboardPage() {
   // ref para desmontarlo antes de signOut (evita permission-denied). Se
   // re-suscribe solo al cambiar de grupo (clave = id), no al refrescar el doc.
   const selectedGroupId = selectedGroup?.id;
+  // A group's `championDeadline` overrides the global cutoff (see groupSchema);
+  // most groups have none and fall back to CHAMPION_DEADLINE.
+  const championDeadline = selectedGroup?.championDeadline ? new Date(toMs(selectedGroup.championDeadline)) : CHAMPION_DEADLINE;
   const groupPredsUnsubRef = useRef<(() => void) | null>(null);
   useEffect(() => {
     // Sin grupo no adjuntamos listener; groupPreds se limpia en el efecto de
@@ -559,7 +562,7 @@ export default function DashboardPage() {
   }
 
   async function handleSaveChampion(team: string) {
-    if (!user || !selectedGroup || isChampionLocked()) return;
+    if (!user || !selectedGroup || isChampionLocked(new Date(), championDeadline)) return;
     setSavingChampion(true);
     try {
       const champId = `${user.uid}_${selectedGroup.id}`;
@@ -933,8 +936,8 @@ export default function DashboardPage() {
             <ChampionPick
               champion={championsByGroup[selectedGroup.id] ?? null}
               teams={WORLD_CUP_TEAMS}
-              locked={isChampionLocked()}
-              deadlineLabel="4 de julio"
+              locked={isChampionLocked(new Date(), championDeadline)}
+              deadlineLabel={selectedGroup.championDeadline ? formatKickoffDate(championDeadline) : "4 de julio"}
               saving={savingChampion}
               onSave={handleSaveChampion}
             />
