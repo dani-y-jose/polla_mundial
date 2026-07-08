@@ -46,6 +46,7 @@ import {
   GroupsIcon,
   ProfileIcon,
   AlbumIcon,
+  ClockIcon,
   type NavItem,
 } from "@/components/shell";
 
@@ -334,6 +335,7 @@ export default function DashboardPage() {
   // A group's `championDeadline` overrides the global cutoff (see groupSchema);
   // most groups have none and fall back to CHAMPION_DEADLINE.
   const championDeadline = selectedGroup?.championDeadline ? new Date(toMs(selectedGroup.championDeadline)) : CHAMPION_DEADLINE;
+  const championHoursLeft = Math.max(0, Math.ceil((championDeadline.getTime() - now) / (60 * 60 * 1000)));
   const groupPredsUnsubRef = useRef<(() => void) | null>(null);
   useEffect(() => {
     // Sin grupo no adjuntamos listener; groupPreds se limpia en el efecto de
@@ -929,6 +931,25 @@ export default function DashboardPage() {
               <Button fullWidth onClick={handleConfirmJoin} disabled={joiningPending}>
                 {joiningPending ? "Uniéndote..." : `Confirmar y unirme a ${pendingInvite.groupName}`}
               </Button>
+            </Card>
+          )}
+
+          {selectedGroup && !championsByGroup[selectedGroup.id] && !isChampionLocked(new Date(), championDeadline) && (
+            <Card padding="lg" className="flex items-center gap-3 border-2 border-[var(--accent)] bg-accent/10">
+              <ClockIcon className="h-6 w-6 shrink-0 text-[var(--accent)]" />
+              <div className="min-w-0 flex-1">
+                <h4 className="font-display text-sm font-extrabold text-ink">No olvides elegir tu campeón</h4>
+                <p className="text-xs text-ink-muted">
+                  Puedes elegirlo hasta el{" "}
+                  <span className="font-bold text-ink">
+                    {selectedGroup.championDeadline ? formatKickoffDateTime(championDeadline) : "4 de julio"}
+                  </span>
+                  .
+                </p>
+              </div>
+              <Badge tone="accent" className="shrink-0">
+                {championHoursLeft <= 1 ? "¡última hora!" : `${championHoursLeft}h restantes`}
+              </Badge>
             </Card>
           )}
 
