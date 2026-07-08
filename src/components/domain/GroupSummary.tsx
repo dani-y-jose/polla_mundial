@@ -122,14 +122,14 @@ export function GroupSummary({ group, memberCount, className }: GroupSummaryProp
         {infoOpen && (
           <div className="mt-2 space-y-2 rounded-lg bg-surface-2 p-3 text-[11px] leading-snug text-ink-muted">
             <p>
-              <strong className="text-ink">Marcador exacto:</strong> acertás el resultado tal cual (ej. 2-1).
+              <strong className="text-ink">Marcador exacto:</strong> aciertas el resultado tal cual (ej. 2-1).
             </p>
             <p>
-              <strong className="text-ink">Acertar al ganador:</strong> acertás quién gana o el empate, aunque el marcador no sea exacto.
+              <strong className="text-ink">Acertar al ganador:</strong> aciertas quién gana o el empate, aunque el marcador no sea exacto.
             </p>
             {rules.uniquePredictionPoints > 0 && (
               <p>
-                <strong className="text-ink">Bono predicción única:</strong> si sos el único del grupo que clava el marcador exacto de un partido, sumás este extra.
+                <strong className="text-ink">Bono predicción única:</strong> si eres el único del grupo que acierta el marcador exacto de un partido, sumas este extra.
               </p>
             )}
             <p>
