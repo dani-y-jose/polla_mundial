@@ -5,8 +5,8 @@ import { useRouter, useParams } from "next/navigation";
 import { onAuthStateChanged, type User as FirebaseUser } from "firebase/auth";
 import { auth, db } from "@/lib/firebase";
 import { collection, getDocs, doc, getDoc, query, where, updateDoc } from "firebase/firestore";
-import { Group, User, Match, Prediction } from "@/types";
-import { groupSchema, userSchema, predictionSchema } from "@/lib/schemas";
+import { Group, User, Match, Prediction, Champion } from "@/types";
+import { groupSchema, userSchema, predictionSchema, championSchema } from "@/lib/schemas";
 import { parseDoc, parseDocs } from "@/lib/parse";
 import { getMatches } from "@/lib/matches";
 import { groupRulesInputSchema, prizeInputSchema, entryFeeSchema, firstError } from "@/lib/form-schemas";
@@ -27,7 +27,8 @@ export default function GroupDetailPage() {
   const [members, setMembers] = useState<User[]>([]);
   const [matches, setMatches] = useState<Match[]>([]);
   const [allPredictions, setAllPredictions] = useState<Prediction[]>([]);
-  
+  const [champions, setChampions] = useState<Champion[]>([]);
+
   const [loading, setLoading] = useState(true);
   const [copied, setCopied] = useState(false);
   const [error, setError] = useState("");
@@ -150,9 +151,15 @@ export default function GroupDetailPage() {
         const predsData = parseDocs(predictionSchema, pSnapshot);
         setAllPredictions(predsData);
 
-        // 5. Calculate scores dynamically per group rules
+        // 5. Fetch this group's champion picks (for the CHAMPION_POINTS bonus).
+        const cQuery = query(collection(db, "champions"), where("groupId", "==", groupId));
+        const cSnapshot = await getDocs(cQuery);
+        const championsData = parseDocs(championSchema, cSnapshot);
+        setChampions(championsData);
+
+        // 6. Calculate scores dynamically per group rules
         const activeRules = groupData.rules || DEFAULT_GROUP_RULES;
-        const calculatedScores = calculateGroupScores(groupId, groupData.members, matchesData, predsData, activeRules);
+        const calculatedScores = calculateGroupScores(groupId, groupData.members, matchesData, predsData, activeRules, championsData);
         setGroupScores(calculatedScores);
 
         // Sort members dynamically
@@ -239,7 +246,7 @@ export default function GroupDetailPage() {
       setGroup(updatedGroup);
 
       // Recalculate dynamic leaderboard scores in real time
-      const calculatedScores = calculateGroupScores(group.id, group.members, matches, allPredictions, updatedRules);
+      const calculatedScores = calculateGroupScores(group.id, group.members, matches, allPredictions, updatedRules, champions);
       setGroupScores(calculatedScores);
 
       // Resort members

@@ -114,6 +114,10 @@ export default function DashboardPage() {
   // Campeón elegido por grupo (groupId -> equipo).
   const [championsByGroup, setChampionsByGroup] = useState<Record<string, string>>({});
   const [savingChampion, setSavingChampion] = useState(false);
+  // Campeón elegido por CADA integrante del grupo activo (uid -> equipo), para
+  // el bono CHAMPION_POINTS en la tabla. A diferencia de `championsByGroup`
+  // (solo el tuyo, por grupo), este listener trae los de todo el grupo activo.
+  const [groupChampions, setGroupChampions] = useState<Record<string, string>>({});
   // Pronósticos de TODO el grupo activo, para "En vivo": matchId -> uid -> Prediction.
   const [groupPreds, setGroupPreds] = useState<Record<string, Record<string, Prediction>>>({});
   const [memberNames, setMemberNames] = useState<Record<string, string>>({});
@@ -363,6 +367,33 @@ export default function DashboardPage() {
     };
   }, [selectedGroupId]);
 
+  // Campeones elegidos por TODO el grupo activo (para el bono CHAMPION_POINTS
+  // en la tabla). Mismo patrón que groupPreds: un onSnapshot re-suscrito solo
+  // al cambiar de grupo.
+  const groupChampionsUnsubRef = useRef<(() => void) | null>(null);
+  useEffect(() => {
+    if (!selectedGroupId) return;
+    const unsub = onSnapshot(
+      query(collection(db, "champions"), where("groupId", "==", selectedGroupId)),
+      (snap) => {
+        const byUid: Record<string, string> = {};
+        parseDocs(championSchema, snap).forEach((c) => {
+          byUid[c.userId] = c.champion;
+        });
+        setGroupChampions(byUid);
+      },
+      (err) => {
+        if ((err as { code?: string }).code === "permission-denied") return;
+        console.error("Error al escuchar campeones del grupo:", err);
+      },
+    );
+    groupChampionsUnsubRef.current = unsub;
+    return () => {
+      unsub();
+      groupChampionsUnsubRef.current = null;
+    };
+  }, [selectedGroupId]);
+
   // Nombres de integrantes (para la tabla y "En vivo"). Lectura puntual: cambian
   // poco; se recargan al cambiar de grupo o al tocar "Actualizar" (que re-lee el
   // doc del grupo → nuevo selectedGroup → este efecto corre de nuevo).
@@ -408,14 +439,19 @@ export default function DashboardPage() {
     if (!selectedGroup) return [];
     const preds = Object.values(groupPreds).flatMap((byUid) => Object.values(byUid));
     const rules = selectedGroup.rules ?? DEFAULT_GROUP_RULES;
-    const scores = calculateGroupScores(selectedGroup.id, selectedGroup.members, visibleMatches, preds, rules);
+    const champions = Object.entries(groupChampions).map(([userId, champion]) => ({
+      userId,
+      groupId: selectedGroup.id,
+      champion,
+    }));
+    const scores = calculateGroupScores(selectedGroup.id, selectedGroup.members, visibleMatches, preds, rules, champions);
     return selectedGroup.members
       .map((uid) => {
         const s = scores[uid] ?? { totalPoints: 0, exactGuesses: 0 };
         return { uid, name: memberNames[uid] ?? "—", points: s.totalPoints, exact: s.exactGuesses };
       })
       .sort((a, b) => b.points - a.points || b.exact - a.exact || a.name.localeCompare(b.name));
-  }, [selectedGroup, groupPreds, visibleMatches, memberNames]);
+  }, [selectedGroup, groupPreds, visibleMatches, memberNames, groupChampions]);
 
   const name = dbUser?.displayName || user?.displayName || user?.email?.split("@")[0] || "jugador";
 
@@ -451,15 +487,17 @@ export default function DashboardPage() {
   };
 
   async function handleSignOut() {
-    // Desmontar los listeners (notificaciones + partidos + pronósticos del
-    // grupo) ANTES de revocar el token, para evitar el "permission-denied" que
-    // dispara Firestore si siguen adjuntos.
+    // Desmontar los listeners (notificaciones + partidos + pronósticos y
+    // campeones del grupo) ANTES de revocar el token, para evitar el
+    // "permission-denied" que dispara Firestore si siguen adjuntos.
     notifUnsubRef.current?.();
     notifUnsubRef.current = null;
     matchesUnsubRef.current?.();
     matchesUnsubRef.current = null;
     groupPredsUnsubRef.current?.();
     groupPredsUnsubRef.current = null;
+    groupChampionsUnsubRef.current?.();
+    groupChampionsUnsubRef.current = null;
     await signOut(auth);
     router.replace("/");
   }

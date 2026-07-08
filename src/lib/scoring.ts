@@ -1,5 +1,5 @@
-import { Match, Prediction, GroupRules } from "@/types";
-import { QUALIFIER_POINTS } from "@/lib/constants";
+import { Match, Prediction, GroupRules, Champion } from "@/types";
+import { QUALIFIER_POINTS, CHAMPION_POINTS } from "@/lib/constants";
 
 /**
  * Calculates the points earned for a prediction based on the actual match score.
@@ -39,6 +39,25 @@ export function getOutcome(home: number, away: number): 'home_win' | 'away_win' 
 }
 
 /**
+ * The tournament's actual champion, derived from the finished final. Penalties
+ * leave the 120' score tied, so the winner comes from `qualifier` in that
+ * case; otherwise it's read off the score. null while the final hasn't
+ * finished yet.
+ */
+function getActualChampion(matches: Match[]): string | null {
+  const final = matches.find(m => m.phase === 'finals' && m.status === 'finished');
+  if (!final) return null;
+
+  if (final.resolutionMethod === 'penalties' && final.qualifier) {
+    return final.qualifier === 'home' ? final.homeTeam : final.awayTeam;
+  }
+
+  const outcome = getOutcome(final.homeScore!, final.awayScore!);
+  if (outcome === 'draw') return null; // shouldn't happen for a finished final
+  return outcome === 'home_win' ? final.homeTeam : final.awayTeam;
+}
+
+/**
  * Dynamically calculates total points and exact guesses for all group members.
  * Supports custom scoring rules, unique prediction bonuses, and phase bonuses.
  *
@@ -51,7 +70,8 @@ export function calculateGroupScores(
   members: string[],
   matches: Match[],
   predictions: Prediction[],
-  rules: GroupRules
+  rules: GroupRules,
+  champions: Pick<Champion, "userId" | "groupId" | "champion">[] = []
 ): Record<string, { totalPoints: number; exactGuesses: number }> {
   const scores: Record<string, { totalPoints: number; exactGuesses: number }> = {};
 
@@ -123,6 +143,17 @@ export function calculateGroupScores(
     finishedMatches.filter(m => m.phase === 'quarter_finals'), 4, rules.semiFinalsBonus);
   awardPhaseBonus(scores, members, groupPredictions,
     finishedMatches.filter(m => m.phase === 'semi_finals'), 2, rules.finalsBonus);
+
+  // 3. Champion bonus: a fixed CHAMPION_POINTS for correctly picking the
+  // tournament winner, resolved once the final has finished.
+  const actualChampion = getActualChampion(matches);
+  if (actualChampion) {
+    champions
+      .filter(c => c.groupId === groupId && members.includes(c.userId) && c.champion === actualChampion)
+      .forEach(c => {
+        scores[c.userId].totalPoints += CHAMPION_POINTS;
+      });
+  }
 
   return scores;
 }

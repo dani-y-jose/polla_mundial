@@ -1,6 +1,6 @@
 import { calculatePoints, calculateGroupScores } from "./scoring";
 import { Match, Prediction, GroupRules } from "@/types";
-import { QUALIFIER_POINTS, matchInGroupScope } from "@/lib/constants";
+import { QUALIFIER_POINTS, CHAMPION_POINTS, matchInGroupScope } from "@/lib/constants";
 
 function runTests() {
   console.log("Testing calculatePoints...");
@@ -317,6 +317,56 @@ function runTests() {
   ];
   const scoresE = calculateGroupScores(GROUP, members, normalKnockout, predictionsE, rules);
   console.assert(scoresE["user1"].totalPoints === 15, `user1 should have 15 pts (exact + unique, no qualifier bonus on a non-penalty match), got ${scoresE["user1"].totalPoints}`);
+
+  console.log("Testing calculateGroupScores (champion bonus)...");
+
+  // Test Case F: Champion bonus, awarded once the final has finished, resolved
+  // from its score (normal time).
+  const finishedFinal: Match[] = [
+    {
+      id: "final1",
+      homeTeam: "Argentina",
+      awayTeam: "Francia",
+      kickoffTime: dummyDate,
+      status: "finished",
+      homeScore: 2,
+      awayScore: 1,
+      phase: "finals",
+      city: "City",
+      stadiumName: "Stadium",
+      refereeName: "Ref",
+      refereeCountry: "US",
+      resolutionMethod: "normal",
+      qualifier: null
+    }
+  ];
+  const championsF = [
+    { userId: "user1", groupId: GROUP, champion: "Argentina" }, // correct
+    { userId: "user2", groupId: GROUP, champion: "Francia" }, // wrong
+    { userId: "user3", groupId: "other-group", champion: "Argentina" } // correct, but another group -> ignored
+  ];
+  const scoresF = calculateGroupScores(GROUP, members, finishedFinal, [], rules, championsF);
+  console.assert(scoresF["user1"].totalPoints === CHAMPION_POINTS, `user1 should have ${CHAMPION_POINTS} pts (correct champion), got ${scoresF["user1"].totalPoints}`);
+  console.assert(scoresF["user2"].totalPoints === 0, `user2 should have 0 pts (wrong champion), got ${scoresF["user2"].totalPoints}`);
+  console.assert(scoresF["user3"].totalPoints === 0, `user3 should have 0 pts (pick belongs to another group), got ${scoresF["user3"].totalPoints}`);
+
+  // No bonus at all when `champions` is omitted (default param).
+  const scoresFNoChampions = calculateGroupScores(GROUP, members, finishedFinal, [], rules);
+  console.assert(scoresFNoChampions["user1"].totalPoints === 0, `user1 should have 0 pts without a champions list, got ${scoresFNoChampions["user1"].totalPoints}`);
+
+  // Final not finished yet -> no bonus, even with a pick that would match.
+  const upcomingFinal: Match[] = [{ ...finishedFinal[0], status: "upcoming", homeScore: null, awayScore: null }];
+  const scoresFUpcoming = calculateGroupScores(GROUP, members, upcomingFinal, [], rules, championsF);
+  console.assert(scoresFUpcoming["user1"].totalPoints === 0, `user1 should have 0 pts (final not finished), got ${scoresFUpcoming["user1"].totalPoints}`);
+
+  // Final decided by penalties: the 120' score is a draw, so the champion is
+  // resolved from `qualifier`, not the score.
+  const penaltiesFinal: Match[] = [
+    { ...finishedFinal[0], homeScore: 1, awayScore: 1, resolutionMethod: "penalties", qualifier: "away" }
+  ];
+  const scoresFPenalties = calculateGroupScores(GROUP, members, penaltiesFinal, [], rules, championsF);
+  console.assert(scoresFPenalties["user1"].totalPoints === 0, `user1 (picked Argentina) should have 0 pts when Francia wins on penalties, got ${scoresFPenalties["user1"].totalPoints}`);
+  console.assert(scoresFPenalties["user2"].totalPoints === CHAMPION_POINTS, `user2 (picked Francia) should have ${CHAMPION_POINTS} pts when Francia wins on penalties, got ${scoresFPenalties["user2"].totalPoints}`);
 
   // ── matchInGroupScope: per-group phase floor ──────────────────────────────
   console.log("Testing matchInGroupScope (group phase floor)...");

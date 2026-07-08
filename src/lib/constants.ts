@@ -73,6 +73,12 @@ export const DEFAULT_GROUP_RULES: GroupRules = {
 // rule by design — see src/lib/scoring.ts.
 export const QUALIFIER_POINTS = 1;
 
+// Fixed bonus for correctly picking the tournament champion (see the
+// `champions` collection and the ChampionPick component). Resolved from the
+// finished final's winner. Not a per-group rule by design, same as
+// QUALIFIER_POINTS — see src/lib/scoring.ts.
+export const CHAMPION_POINTS = 5;
+
 // Knockout matches (everything past the group stage) can't end in a draw, so
 // they carry the "clasifica" pick. Used by the dashboard (when to show the
 // qualifier toggle) and admin (when to ask which team advanced on penalties).
