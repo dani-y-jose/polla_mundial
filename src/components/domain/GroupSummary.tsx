@@ -27,7 +27,8 @@ function Rule({ label, pts, bonus }: { label: string; pts: number; bonus?: boole
 export function GroupSummary({ group, memberCount, className }: GroupSummaryProps) {
   const fee = group.entryFee ?? 0;
   const paid = fee > 0;
-  const pool = memberCount * fee;
+  const exemptCount = group.feeExemptMembers?.filter((uid) => group.members.includes(uid)).length ?? 0;
+  const pool = Math.max(0, memberCount - exemptCount) * fee;
   const dist = group.prizeDistribution;
   const rules = group.rules ?? DEFAULT_GROUP_RULES;
 
@@ -59,6 +60,11 @@ export function GroupSummary({ group, memberCount, className }: GroupSummaryProp
           <div className="text-right">
             <p className="text-[10px] font-bold uppercase tracking-wider text-ink-muted">Pozo estimado</p>
             <p className="font-display text-lg font-extrabold tabular-nums text-ink">🏆 {money(pool)}</p>
+            {exemptCount > 0 && (
+              <p className="text-[10px] text-ink-faint">
+                {exemptCount === 1 ? "1 integrante exento" : `${exemptCount} integrantes exentos`} de inscripción
+              </p>
+            )}
           </div>
         )}
       </div>

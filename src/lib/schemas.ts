@@ -118,6 +118,10 @@ export const groupSchema = z.object({
   // is hidden. Absent means the group plays the whole tournament (floor = "group").
   // Set at creation and not editable afterwards; see matchInGroupScope in constants.
   startPhase: matchPhaseSchema.optional(),
+  // Members who don't pay the entry fee. They still play and appear in the
+  // leaderboard, but the estimated pot excludes them (pozo = paying members ×
+  // inscripción). Only written via the admin CLI — there is no UI to edit it.
+  feeExemptMembers: z.array(z.string()).optional(),
 });
 export type Group = z.infer<typeof groupSchema>;
 

@@ -282,6 +282,10 @@ export default function GroupDetailPage() {
   // Shared WhatsApp invite copy (used by the invite card and the success modal).
   const inviteShareMessage = `¡Únete a mi grupo de apuestas en La Polla Mundial 2026! ⚽🏆\n\nGrupo: *${group.name}*\nCódigo de Invitación: *${group.inviteCode}*\nInscripción: *${group.entryFee ? `$${group.entryFee.toLocaleString()}` : "Gratis"}*\n\nRegístrate e ingresa tus pronósticos aquí: ${typeof window !== "undefined" ? window.location.origin : ""}/?invite=${group.inviteCode}`;
 
+  // Fee-exempt members play but don't contribute to the pot.
+  const feeExemptCount = group.feeExemptMembers?.filter((uid) => group.members.includes(uid)).length ?? 0;
+  const payingCount = Math.max(0, group.members.length - feeExemptCount);
+
   return (
     <div className="min-h-screen bg-black text-white p-8">
       <div className="max-w-5xl mx-auto space-y-12">
@@ -354,13 +358,18 @@ export default function GroupDetailPage() {
                 <div className="space-y-1">
                   <div className="flex justify-between items-center bg-black/40 px-4 py-2.5 rounded-xl border border-white/5">
                     <span className="text-xs text-gray-400">Pozo Total Est.:</span>
-                    <span className="text-sm font-extrabold text-yellow-400">{`$${(members.length * group.entryFee).toLocaleString()}`}</span>
+                    <span className="text-sm font-extrabold text-yellow-400">{`$${(payingCount * group.entryFee).toLocaleString()}`}</span>
                   </div>
+                  {feeExemptCount > 0 && (
+                    <p className="text-[10px] text-gray-500 px-2">
+                      {feeExemptCount === 1 ? "1 integrante exento" : `${feeExemptCount} integrantes exentos`} de inscripción
+                    </p>
+                  )}
                   {group.prizeDistribution && (
                     <div className="text-[10px] text-gray-400 flex justify-between px-2 pt-1 font-medium">
-                      <span>1º: {group.prizeDistribution.firstPlacePercent}% (${((members.length * group.entryFee) * group.prizeDistribution.firstPlacePercent / 100).toLocaleString()})</span>
-                      <span>2º: {group.prizeDistribution.secondPlacePercent}% (${((members.length * group.entryFee) * group.prizeDistribution.secondPlacePercent / 100).toLocaleString()})</span>
-                      <span>3º: {group.prizeDistribution.thirdPlacePercent}% (${((members.length * group.entryFee) * group.prizeDistribution.thirdPlacePercent / 100).toLocaleString()})</span>
+                      <span>1º: {group.prizeDistribution.firstPlacePercent}% (${((payingCount * group.entryFee) * group.prizeDistribution.firstPlacePercent / 100).toLocaleString()})</span>
+                      <span>2º: {group.prizeDistribution.secondPlacePercent}% (${((payingCount * group.entryFee) * group.prizeDistribution.secondPlacePercent / 100).toLocaleString()})</span>
+                      <span>3º: {group.prizeDistribution.thirdPlacePercent}% (${((payingCount * group.entryFee) * group.prizeDistribution.thirdPlacePercent / 100).toLocaleString()})</span>
                     </div>
                   )}
                 </div>
