@@ -12,6 +12,7 @@ export const PHASE_TRANSLATIONS: Record<string, string> = {
   round_of_16: "Octavos de Final",
   quarter_finals: "Cuartos de Final",
   semi_finals: "Semifinales",
+  third_place: "Tercer Puesto",
   finals: "Gran Final",
 };
 
@@ -24,6 +25,7 @@ export const PHASE_ORDER: MatchPhase[] = [
   "round_of_16",
   "quarter_finals",
   "semi_finals",
+  "third_place",
   "finals",
 ];
 

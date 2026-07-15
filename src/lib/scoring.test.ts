@@ -368,6 +368,45 @@ function runTests() {
   console.assert(scoresFPenalties["user1"].totalPoints === 0, `user1 (picked Argentina) should have 0 pts when Francia wins on penalties, got ${scoresFPenalties["user1"].totalPoints}`);
   console.assert(scoresFPenalties["user2"].totalPoints === CHAMPION_POINTS, `user2 (picked Francia) should have ${CHAMPION_POINTS} pts when Francia wins on penalties, got ${scoresFPenalties["user2"].totalPoints}`);
 
+  console.log("Testing calculateGroupScores (third-place match is scoring-inert beyond base points)...");
+
+  // Test Case G: a third_place match scores like any knockout match (base
+  // points + unique bonus), but must NOT resolve the champion (only `finals`
+  // does — getActualChampion keys off phase === 'finals') and must NOT trigger
+  // or retract any phase bonus (those key off round_of_16/quarter_finals/
+  // semi_finals). This is what makes adding the bronze final safe.
+  const thirdPlace: Match[] = [
+    {
+      ...finishedFinal[0],
+      id: "tp1",
+      homeTeam: "Francia",
+      awayTeam: "Inglaterra",
+      phase: "third_place",
+      homeScore: 2,
+      awayScore: 0,
+      resolutionMethod: "normal",
+      qualifier: null,
+    }
+  ];
+  const predictionsG: Prediction[] = [
+    {
+      id: "pg1",
+      userId: "user1",
+      groupId: GROUP,
+      matchId: "tp1",
+      predictedHomeScore: 2,
+      predictedAwayScore: 0, // exact (5) + unique (10)
+      predictedQualifier: "home",
+      pointsEarned: null,
+      timestamp: dummyDate
+    }
+  ];
+  // A champion pick equal to the third-place winner must NOT be rewarded: no
+  // `finals` match is present, so getActualChampion returns null.
+  const championsG = [{ userId: "user1", groupId: GROUP, champion: "Francia" }];
+  const scoresG = calculateGroupScores(GROUP, members, thirdPlace, predictionsG, rules, championsG);
+  console.assert(scoresG["user1"].totalPoints === 15, `user1 should have 15 pts (exact 5 + unique 10; no champion or phase bonus from a third_place match), got ${scoresG["user1"].totalPoints}`);
+
   // ── matchInGroupScope: per-group phase floor ──────────────────────────────
   console.log("Testing matchInGroupScope (group phase floor)...");
   const m = (phase: string) => ({ phase } as unknown as Match);
@@ -380,7 +419,11 @@ function runTests() {
   console.assert(matchInGroupScope(m("round_of_16"), qfGroup) === false, "cuartos group excludes octavos");
   console.assert(matchInGroupScope(m("quarter_finals"), qfGroup) === true, "cuartos group includes cuartos");
   console.assert(matchInGroupScope(m("semi_finals"), qfGroup) === true, "cuartos group includes semis");
+  console.assert(matchInGroupScope(m("third_place"), qfGroup) === true, "cuartos group includes tercer puesto");
   console.assert(matchInGroupScope(m("finals"), qfGroup) === true, "cuartos group includes final");
+  // third_place sits just before the final in PHASE_ORDER, so a final-only
+  // group does not play it.
+  console.assert(matchInGroupScope(m("third_place"), { startPhase: "finals" as const }) === false, "final-only group excludes tercer puesto");
   // Floor equal to the phase is inclusive; an unknown phase sorts last (out).
   console.assert(matchInGroupScope(m("finals"), { startPhase: "finals" as const }) === true, "final-only group includes final");
   console.assert(matchInGroupScope(m("bogus"), qfGroup) === true, "unknown phase sorts last → shown, never silently hidden");

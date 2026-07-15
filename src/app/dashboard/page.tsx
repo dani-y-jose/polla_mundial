@@ -87,6 +87,7 @@ const PRED_PHASES: { key: string; label: string }[] = [
   { key: "round_of_16", label: "Octavos" },
   { key: "quarter_finals", label: "Cuartos" },
   { key: "semi_finals", label: "Semis" },
+  { key: "third_place", label: "3er Puesto" },
   { key: "finals", label: "Final" },
 ];
 

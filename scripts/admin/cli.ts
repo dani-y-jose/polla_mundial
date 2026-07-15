@@ -25,7 +25,7 @@ const DEFAULT_RULES: GroupRules = {
 };
 
 const RESOLUTIONS = ["normal", "extra_time", "penalties"] as const;
-const PHASES: MatchPhase[] = ["group", "round_of_32", "round_of_16", "quarter_finals", "semi_finals", "finals"];
+const PHASES: MatchPhase[] = ["group", "round_of_32", "round_of_16", "quarter_finals", "semi_finals", "third_place", "finals"];
 const KNOWN_COLLECTIONS = ["users", "matches", "predictions", "champions", "groups", "invites", "inviteCodes"];
 
 const USAGE = `polla admin CLI — query & manage Firestore (bypasses security rules)
@@ -45,7 +45,7 @@ Domain:
   groups:list [--json]                        id, name, member count, rules summary
   matches:list [--status upcoming|locked|finished] [--json]
   matches:create <home> <away> <kickoffISO> [--phase group|round_of_32|round_of_16|
-                 quarter_finals|semi_finals|finals] [--city] [--stadium] [--referee] [--id] [--yes]
+                 quarter_finals|semi_finals|third_place|finals] [--city] [--stadium] [--referee] [--id] [--yes]
   matches:seed [--yes]                        insert the 72 WC2026 group matches (missing only)
   matches:delete <matchId> [--yes]            delete a match AND every prediction tied to it
   matches:score <matchId> <home> <away> [--resolution normal|extra_time|penalties]

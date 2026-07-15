@@ -41,7 +41,7 @@ export const zTimestampLoose = z.custom<Date | Timestamp | number | string>(
 
 // ---- Enums ----
 export const matchStatusSchema = z.enum(["upcoming", "locked", "finished"]);
-export const matchPhaseSchema = z.enum(["group", "round_of_32", "round_of_16", "quarter_finals", "semi_finals", "finals"]);
+export const matchPhaseSchema = z.enum(["group", "round_of_32", "round_of_16", "quarter_finals", "semi_finals", "third_place", "finals"]);
 export const resolutionMethodSchema = z.enum(["normal", "extra_time", "penalties"]).nullable();
 
 export type MatchStatus = z.infer<typeof matchStatusSchema>;
